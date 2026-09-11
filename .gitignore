@@ -1,0 +1,79 @@
+﻿# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment Variables & Secrets
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# Model weights, checkpoints & large binaries
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/adapters/*
+!models/adapters/.gitkeep
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+*.gguf
+
+# Data files (raw & heavy files)
+data/raw/cvs/*
+!data/raw/cvs/.gitkeep
+data/raw/jobs/*
+!data/raw/jobs/.gitkeep
+data/processed/structured_cvs/*
+!data/processed/structured_cvs/.gitkeep
+data/processed/structured_jobs/*
+!data/processed/structured_jobs/.gitkeep
+data/datasets/matching_pairs/*
+!data/datasets/matching_pairs/.gitkeep
+data/datasets/hr_instructions/*
+!data/datasets/hr_instructions/.gitkeep
+data/evaluation/*
+!data/evaluation/.gitkeep
+*.parquet
+*.sqlite
+*.sqlite3
+
+# Vector DB & Cache Storage
+qdrant_storage/
+redis_data/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and telemetry
+*.log
+logs/
+wandb/
+mlruns/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Knowledge Base & Private Docs
+knowledge-base/
+
