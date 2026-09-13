@@ -1,0 +1,23 @@
+# Embedding Service Configuration
+embedding:
+  model_name: "BAAI/bge-m3"
+  dimension: 1024
+  max_seq_length: 8192
+  normalize: true
+  batch_size: 32
+  device: null  # auto-detect: cuda > cpu
+
+# Azure PostgreSQL + pgvector Configuration (Region: Indonesia Central / indonesiacentral)
+database:
+  host: "capstonedb1.postgres.database.azure.com"
+  port: 5432
+  database: "postgres"
+  user: "capstonedbadmin"
+  password: ""           # override via PG_PASSWORD env var
+  sslmode: "require"
+  table_name: "cv_embeddings"
+  dimension: 1024
+  distance_metric: "cosine"  # uses <=> operator in pgvector
+  index_type: "hnsw"
+  hnsw_m: 16
+  hnsw_ef_construction: 64

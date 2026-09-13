@@ -196,3 +196,68 @@ def first_pdf_in_dataset() -> Path | None:
 def pdf_files_sample() -> list[Path]:
     """Returns up to 5 PDF files from the dataset for smoke tests."""
     return list(DATA_RAW_CVS.rglob("*.pdf"))[:5]
+
+
+# ---------------------------------------------------------------------------
+# Day 3 — Embedding & Vector Store Fixtures
+# ---------------------------------------------------------------------------
+
+from src.embeddings.embedder import MockEmbedder
+from src.vector_db.pgvector_store import InMemoryVectorStore
+
+
+@pytest.fixture
+def mock_embedder() -> MockEmbedder:
+    """
+    Deterministic, zero-dependency embedding client for unit and integration tests.
+    Same text always produces the same vector. Different texts → different vectors.
+    """
+    return MockEmbedder(dimension=1024)
+
+
+@pytest.fixture
+def sample_jd_text() -> str:
+    """Typical job description for a Backend Software Engineer position."""
+    return (
+        "Software Engineer - Backend\n"
+        "Requirements: Python, FastAPI, Docker, Redis, PostgreSQL\n"
+        "3+ years experience in backend development.\n"
+        "Strong knowledge of REST APIs, microservices, and CI/CD.\n"
+        "Education: BS in Computer Science or equivalent."
+    )
+
+
+@pytest.fixture
+def sample_jd_text_data_science() -> str:
+    """Job description for a Data Scientist / ML Engineer role (different domain)."""
+    return (
+        "Data Scientist - Machine Learning\n"
+        "Requirements: Python, PyTorch, TensorFlow, Scikit-learn, SQL, Statistics.\n"
+        "2+ years in ML/AI research or applied data science projects.\n"
+        "Experience with feature engineering, model evaluation, and A/B testing.\n"
+        "Education: MS/PhD in Data Science, Statistics, Mathematics, or related field."
+    )
+
+
+@pytest.fixture
+def sample_jd_text_hr() -> str:
+    """Job description for an HR Manager role (semantically unrelated to SE/DS)."""
+    return (
+        "HR Manager - Human Resources\n"
+        "Requirements: Employee relations, recruitment, performance management, HRIS.\n"
+        "5+ years in HR operations and talent management.\n"
+        "Excellent interpersonal and communication skills.\n"
+        "Education: BS in Human Resources, Business Administration, or related field."
+    )
+
+
+@pytest.fixture
+def in_memory_store() -> InMemoryVectorStore:
+    """
+    Freshly initialized InMemoryVectorStore for zero-Docker, zero-network unit tests.
+    Automatically creates the default table on construction.
+    """
+    store = InMemoryVectorStore(dimension=1024)
+    store.create_table("test_cv_embeddings")
+    return store
+
