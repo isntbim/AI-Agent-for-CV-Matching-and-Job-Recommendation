@@ -1,0 +1,77 @@
+{
+  "total_files": 601,
+  "sample_size": 150,
+  "overall_stats": {
+    "mean_words": 804.0,
+    "median_words": 670.0,
+    "std_words": 684.8,
+    "min_words": 0,
+    "max_words": 3477,
+    "est_mean_tokens": 1069.0,
+    "est_median_tokens": 891.0,
+    "est_min_tokens": 0.0,
+    "est_max_tokens": 4624.0
+  },
+  "domain_stats": {
+    "ACCOUNTANT": {
+      "total_files": 118,
+      "sampled": 25,
+      "mean_words": 890.28,
+      "median_words": 810.0,
+      "std_words": 552.1981905077198,
+      "min_words": 425,
+      "max_words": 3469,
+      "mean_chars": 6512.12
+    },
+    "Data Scientist Analyst": {
+      "total_files": 100,
+      "sampled": 25,
+      "mean_words": 801.16,
+      "median_words": 469.0,
+      "std_words": 837.8803103069079,
+      "min_words": 76,
+      "max_words": 3474,
+      "mean_chars": 6936.04
+    },
+    "FrontendWebDeveloper": {
+      "total_files": 101,
+      "sampled": 25,
+      "mean_words": 977.48,
+      "median_words": 588.0,
+      "std_words": 812.103940145595,
+      "min_words": 0,
+      "max_words": 2759,
+      "mean_chars": 7162.6
+    },
+    "HR": {
+      "total_files": 110,
+      "sampled": 25,
+      "mean_words": 775.96,
+      "median_words": 717.0,
+      "std_words": 170.47732517845296,
+      "min_words": 512,
+      "max_words": 1216,
+      "mean_chars": 5786.6
+    },
+    "Marketing Executive": {
+      "total_files": 71,
+      "sampled": 25,
+      "mean_words": 656.6,
+      "median_words": 462.0,
+      "std_words": 657.5134371250523,
+      "min_words": 0,
+      "max_words": 3352,
+      "mean_chars": 4634.28
+    },
+    "Software Engineer": {
+      "total_files": 101,
+      "sampled": 25,
+      "mean_words": 722.76,
+      "median_words": 427.0,
+      "std_words": 787.0756649776437,
+      "min_words": 66,
+      "max_words": 3477,
+      "mean_chars": 5469.12
+    }
+  }
+}

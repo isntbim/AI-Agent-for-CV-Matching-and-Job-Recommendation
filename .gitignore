@@ -82,6 +82,11 @@ htmlcov/
 # Local Knowledge Base & Private Docs
 knowledge-base/
 
+# Local documentation & session tooling (kept out of GitHub)
+docs/
+.mcp.json
+.claude/
+
 # Third-party crawlers & external scrapers
 crawlers/
 
