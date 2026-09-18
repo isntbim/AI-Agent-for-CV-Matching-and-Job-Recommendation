@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,6 +19,7 @@ env/
 *.pem
 *.key
 credentials.json
+start-claude.ps1
 
 # Model weights, checkpoints & large binaries
 models/checkpoints/*
@@ -37,10 +38,14 @@ data/raw/cvs/*
 !data/raw/cvs/.gitkeep
 data/raw/jobs/*
 !data/raw/jobs/.gitkeep
+data/raw/jobs_vi/*
+!data/raw/jobs_vi/.gitkeep
 data/processed/structured_cvs/*
 !data/processed/structured_cvs/.gitkeep
 data/processed/structured_jobs/*
 !data/processed/structured_jobs/.gitkeep
+data/processed/structured_jobs_vi/*
+!data/processed/structured_jobs_vi/.gitkeep
 data/datasets/matching_pairs/*
 !data/datasets/matching_pairs/.gitkeep
 data/datasets/hr_instructions/*
@@ -76,4 +81,7 @@ htmlcov/
 
 # Local Knowledge Base & Private Docs
 knowledge-base/
+
+# Third-party crawlers & external scrapers
+crawlers/
 
