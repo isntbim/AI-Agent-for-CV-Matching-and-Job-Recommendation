@@ -94,6 +94,8 @@ class BGEEmbedder:
         batch_size: int = 32,
         max_seq_length: int = 8192,
         normalize_embeddings: bool = True,
+        revision: Optional[str] = None,
+        cache_folder: Optional[str] = None,
     ) -> None:
         """
         Initialize and load the BGE-M3 model.
@@ -128,7 +130,13 @@ class BGEEmbedder:
         self._device = device
         logger.info(f"[BGEEmbedder] Loading model '{model_name}' on device='{device}'...")
 
-        self._model = SentenceTransformer(model_name, device=device)
+        model_options = {"device": device}
+        if revision is not None:
+            model_options["revision"] = revision
+        if cache_folder is not None:
+            model_options["cache_folder"] = cache_folder
+        self._model = SentenceTransformer(model_name, **model_options)
+        self.revision = revision or getattr(self._model[0].auto_model.config, "_commit_hash", None)
         self._model.max_seq_length = max_seq_length
         # get_embedding_dimension() is the updated API in newer sentence-transformers versions
         get_dim = getattr(

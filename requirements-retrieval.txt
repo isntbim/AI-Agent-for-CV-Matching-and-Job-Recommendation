@@ -1,0 +1,11 @@
+# Tested retrieval/pilot environment; install PyTorch separately for your hardware.
+-r requirements.txt
+transformers==5.17.0
+sentence-transformers==5.7.0
+huggingface-hub==1.31.0
+openpyxl==3.1.5
+
+# Existing scorer/EDA regression suite.
+matplotlib>=3.8
+pandas>=2.2
+plotly>=5.20
