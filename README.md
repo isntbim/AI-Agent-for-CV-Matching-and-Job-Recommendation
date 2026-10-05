@@ -1,4 +1,4 @@
-﻿# AI Agent for CV Matching and Job Recommendation Using Large Language Models
+# AI Agent for CV Matching and Job Recommendation Using Large Language Models
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -71,9 +71,9 @@ SS9 - FinalSeason/
 ├── configs/               # System configurations (YAML)
 ├── data/                  # Data directories (raw, processed, datasets, evaluation)
 ├── docker/                # Dockerfile and Docker Compose manifests
-├── docs/                  # Architecture specs and research drafts
+├── docs/                  # Guides, reference material, authored reports, and assets
 ├── eval/                  # IR and NLP evaluation metrics and benchmarks
-├── knowledge-base/        # Project knowledge guides and system instructions
+├── knowledge-base/        # Private plans, session handoffs, and local credentials
 ├── models/                # Checkpoints and LoRA adapter weights
 ├── notebooks/             # EDA and experimentation notebooks
 ├── scripts/               # Automation, scraper, and utility scripts
@@ -99,3 +99,11 @@ SS9 - FinalSeason/
   * **Lê Trí Dũng** (Leader) - Student Code: SE196261
   * **Thái Thành Nhân** (Member) - Student Code: SE196293
   * **Nguyễn Danh Bằng** (Member) - Student Code: SE194871
+
+## Extraction pilot and retrieval CLI
+
+See [extraction and retrieval run instructions](docs/guides/extraction_retrieval.md) for the source-reviewed pilot, frozen document splits, cleaned primary JD corpus, BGE-M3/BM25 retrieval, optional BGE reranking, local diagnostics, and the Azure verification checkpoint.
+
+### Documentation and generated results
+
+Start with the [documentation index](docs/README.md). Published guides and selected observations live in `docs/`; private plans and session notes live in ignored `knowledge-base/`; generated datasets, experiment reports, and verification receipts live in ignored `output/`. The documentation index explains which material is published and which paths refer to local artifacts.

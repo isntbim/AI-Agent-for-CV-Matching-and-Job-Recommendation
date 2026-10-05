@@ -81,6 +81,7 @@ htmlcov/
 
 # Local Knowledge Base & Private Docs
 knowledge-base/
+/reports/
 
 # Local documentation & session tooling (kept out of GitHub)
 docs/
@@ -90,3 +91,36 @@ docs/
 # Third-party crawlers & external scrapers
 crawlers/
 
+
+# Local agent and editor state
+/.codex/
+/.serena/
+/.codex-finalizer/
+
+# Generated presentation files
+/_pptx_beautify_build/
+/output/
+
+# Local conversation notes
+/recap.txt
+
+# Publish the documentation index and selected shareable guides/reports.
+!/docs/
+/docs/*
+!/docs/README.md
+!/docs/guides/
+/docs/guides/*
+!/docs/guides/ats_scorer.md
+!/docs/guides/extraction_retrieval.md
+!/docs/explanations/
+/docs/explanations/*
+!/docs/explanations/scorer_explanation.md
+!/docs/reference/
+/docs/reference/*
+!/docs/reference/scorer_references.md
+!/docs/reports/
+/docs/reports/*
+!/docs/reports/model-extraction/
+/docs/reports/model-extraction/*
+!/docs/reports/model-extraction/base_qwen_observations.md
+!/docs/reports/model-extraction/gemini_smoke_observations.md
