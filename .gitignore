@@ -81,6 +81,7 @@ htmlcov/
 
 # Local Knowledge Base & Private Docs
 knowledge-base/
+/human-verify/
 /reports/
 
 # Local documentation & session tooling (kept out of GitHub)
@@ -118,9 +119,15 @@ crawlers/
 !/docs/reference/
 /docs/reference/*
 !/docs/reference/scorer_references.md
+!/docs/research/
+/docs/research/*
+!/docs/research/ats_scorer/
 !/docs/reports/
 /docs/reports/*
 !/docs/reports/model-extraction/
 /docs/reports/model-extraction/*
 !/docs/reports/model-extraction/base_qwen_observations.md
 !/docs/reports/model-extraction/gemini_smoke_observations.md
+data/raw/external/*
+!data/raw/external/.gitkeep
+!data/raw/external/README.md

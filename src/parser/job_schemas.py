@@ -4,8 +4,11 @@ Optimized for AI Agent CV Matching & Job Recommendation System.
 Provides strict validation, serialization, and embedding text generation for BGE-M3 dense retrieval.
 """
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
+
+from .skill_v2 import RequirementUnit
+from .skill_v3 import RequirementUnitV3
 
 
 class BaseJobModel(BaseModel):
@@ -48,6 +51,7 @@ class SkillsSection(BaseJobModel):
     required: List[SkillItem] = Field(default_factory=list, description="Mandatory required skills")
     preferred: List[SkillItem] = Field(default_factory=list, description="Nice-to-have / preferred skills")
     raw_text: Optional[str] = Field(default=None, description="Raw skills summary string")
+    requirements: List[RequirementUnit | RequirementUnitV3] = Field(default_factory=list, description="Requirement units; v3 option_details record independent depth evidence")
 
 
 class DescriptionSection(BaseJobModel):
@@ -84,6 +88,7 @@ class JobDescriptionSchema(BaseJobModel):
     Standardized Job Description Schema for the AI Agent Matching System.
     Guarantees structural parity with CV representations and powers dense vector embeddings.
     """
+    schema_version: Literal["job-v1", "job-v2", "job-v3"] = "job-v1"
     id: str = Field(..., description="Unique job identifier, e.g. 'jd_001'")
     source: str = Field(default="itviec", description="Origin source portal")
     url: str = Field(..., description="Direct URL link to job posting")

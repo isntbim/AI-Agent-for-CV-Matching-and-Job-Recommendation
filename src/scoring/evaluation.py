@@ -7,6 +7,23 @@ from collections import Counter, defaultdict
 from .models import ScorerConfig, runtime_grade
 
 
+def _rows_config(rows: list[dict]) -> ScorerConfig:
+    if len({r["result"].get("precision_policy_version", "legacy") for r in rows}) != 1:
+        raise ValueError("Cannot combine scores from different precision policies")
+    configs = [ScorerConfig.model_validate(r["result"].get("config", {})) for r in rows]
+    base = configs[0]
+    identity = base.model_dump(exclude={"lower_threshold", "upper_threshold"})
+    if any(config.model_dump(exclude={"lower_threshold", "upper_threshold"}) != identity for config in configs):
+        raise ValueError("Cannot combine scores from different scorer configurations")
+    artifacts = [r.get("artifact_identity") for r in rows]
+    if any(artifacts):
+        from .v2_benchmark import require_same_identity
+        if not all(artifacts):
+            raise ValueError("Cannot combine scores with missing artifact identity")
+        require_same_identity(*artifacts)
+    return base
+
+
 def classification_metrics(labels: list[int], predictions: list[int]) -> dict:
     if len(labels) != len(predictions) or not labels:
         raise ValueError("Metrics require equal-length, nonempty inputs")
@@ -28,24 +45,42 @@ def classification_metrics(labels: list[int], predictions: list[int]) -> dict:
                 "per_label": by_label, "confusion_matrix": matrix, "n": len(labels)}
 
 
+def _grade_values(result, config):
+    if config.version == "ats-en-v3" and result.get("precision_policy_version"):
+        if "unrounded_scores" not in result or "unrounded_overall_score" not in result:
+            raise ValueError("Full-precision v3 evaluation requires unrounded scores")
+        scores = result["unrounded_scores"]
+        return result["unrounded_overall_score"], scores["skills"], scores["title"]
+    return result["overall_score"], result["scores"]["skills"], result["scores"]["title"]
+
+
 def calibrate(rows: list[dict], baseline: bool = False) -> ScorerConfig:
     if any(row["split"] != "development" for row in rows):
         raise ValueError("Calibration accepts development rows only")
     if {r["label_id"] for r in rows} != {0, 1, 2}:
         raise ValueError("Calibration requires all three development labels")
+    source_config = _rows_config(rows)
+    base_config = ScorerConfig() if baseline else source_config
     best_key, best = None, None
     # A histogram makes the exhaustive 5,050-threshold search inexpensive.
     histogram = Counter()
     for r in rows:
         result = r["result"]
-        value = r["baseline_skill_score"] if baseline else result["overall_score"]
-        eligible = baseline or (result["scores"]["skills"] >= 70 and result["scores"]["title"] >= 70)
-        histogram[(r["label_id"], value, eligible)] += 1
+        raw_total, raw_skills, raw_title = _grade_values(result, source_config)
+        value = r["baseline_skill_score"] if baseline else raw_total
+        gate = result.get("skills_breakdown") or {}
+        blocked = base_config.version in {"ats-en-v2", "ats-en-v3"} and gate.get("strong_blocked", False)
+        forced = not baseline and base_config.version in {"ats-en-v2", "ats-en-v3"} and gate.get("force_mismatch", False)
+        eligible = baseline or (not blocked and raw_skills >= base_config.strong_skill_min
+                                and raw_title >= base_config.strong_title_min)
+        histogram[(r["label_id"], value, eligible, forced)] += 1
     for lower in range(100):
         for upper in range(lower + 1, 101):
+            config = base_config.model_copy(update={"lower_threshold": lower, "upper_threshold": upper})
             matrix = [[0] * 3 for _ in range(3)]
-            for (label, value, eligible), count in histogram.items():
-                prediction = 2 if value >= upper and eligible else 1 if value >= lower else 0
+            for (label, value, eligible, forced), count in histogram.items():
+                prediction = runtime_grade(value, base_config.strong_skill_min if eligible else -1,
+                    base_config.strong_title_min if eligible else -1, config, {"force_mismatch": forced})
                 matrix[label][prediction] += count
             f1s = []
             for label in range(3):
@@ -53,7 +88,7 @@ def calibrate(rows: list[dict], baseline: bool = False) -> ScorerConfig:
                 f1s.append(2 * matrix[label][label] / denominator if denominator else 0)
             key = (statistics.mean(f1s), -(abs(lower - 50) + abs(upper - 75)), -lower, -upper)
             if best_key is None or key > best_key:
-                best_key, best = key, ScorerConfig(lower_threshold=lower, upper_threshold=upper)
+                best_key, best = key, config
     return best
 
 
@@ -80,9 +115,12 @@ def evaluate(rows: list[dict], config: ScorerConfig, baseline_config: ScorerConf
         raise ValueError("Evaluation requires held-out test rows")
     if {r["label_id"] for r in rows} != {0, 1, 2}:
         raise ValueError("Successful test extraction must retain all three labels")
+    source_config = _rows_config(rows)
+    if source_config.model_dump(exclude={"lower_threshold", "upper_threshold"}) != config.model_dump(exclude={"lower_threshold", "upper_threshold"}):
+        raise ValueError("Evaluation configuration does not match score artifact")
     labels = [r["label_id"] for r in rows]
-    predictions = [runtime_grade(r["result"]["overall_score"], r["result"]["scores"]["skills"],
-                                 r["result"]["scores"]["title"], config) for r in rows]
+    predictions = [runtime_grade(*_grade_values(r["result"], config), config,
+                                 r["result"].get("skills_breakdown")) for r in rows]
     simple = [2 if r["baseline_skill_score"] >= baseline_config.upper_threshold else
               1 if r["baseline_skill_score"] >= baseline_config.lower_threshold else 0 for r in rows]
     groups = {str(label): [r["result"]["overall_score"] for r in rows if r["label_id"] == label] for label in range(3)}

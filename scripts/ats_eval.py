@@ -30,7 +30,7 @@ from src.scoring.extraction import (
 )
 from src.scoring.gemini import GeminiClient
 from src.scoring.models import ScorerConfig
-from src.scoring.rules import score_pair
+from src.scoring import score_pair
 
 _BATCH_ERRORS = (ExtractionError, ValueError, OSError, httpx.HTTPError)
 

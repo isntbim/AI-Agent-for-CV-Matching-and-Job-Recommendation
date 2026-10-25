@@ -70,6 +70,13 @@ def main() -> None:
     parser.add_argument("--full", action="store_true", help="Score every stored pair instead of sampling")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--as-of", type=date.fromisoformat, required=True)
+    parser.add_argument("--ruleset", choices=("v1", "v2", "v3"), default="v1", help="v1 remains the default")
+    parser.add_argument("--depth-policy", choices=("off", "score_only", "full"))
+    parser.add_argument("--preferred-policy", choices=("separate", "legacy_share"), help="v3 defaults to separate Preferred coverage")
+    parser.add_argument("--annotation-corpus", type=Path, help="Source-reviewed ATS v2 corpus")
+    parser.add_argument("--variant", choices=("equal_groups", "group_weights", "semantic", "proficiency", "full"))
+    parser.add_argument("--relations", type=Path, help="Versioned directed relationship table")
+    parser.add_argument("--allow-provisional-relations", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     args.output = args.output or ROOT / ("output/ats/silver_full" if args.full else "output/ats/silver_sample")
@@ -79,6 +86,40 @@ def main() -> None:
         "jobs": ROOT / "data/processed/structured_jobs/all_jobs_en.json",
     }
     data = {key: json.loads(path.read_text(encoding="utf-8")) for key, path in paths.items()}
+    if args.depth_policy and args.ruleset != "v3":
+        parser.error("--depth-policy requires --ruleset v3")
+    if args.preferred_policy and args.ruleset != "v3":
+        parser.error("--preferred-policy requires --ruleset v3")
+    if args.ruleset == "v3":
+        from src.scoring.v3_benchmark import run_benchmark as run_v3
+        if args.variant or args.relations or args.allow_provisional_relations:
+            parser.error("v3 silver diagnostics use the reviewed corpus relation table and full variant")
+        output = args.output if args.output != ROOT / ("output/ats/silver_full" if args.full else "output/ats/silver_sample") else ROOT / ("output/scorer_v3/silver_full" if args.full else "output/scorer_v3/silver_sample")
+        report = run_v3(ROOT, as_of=args.as_of, corpus_path=args.annotation_corpus or ROOT / "output/scorer_v3/corpus.json",
+            output=output, policies=(args.depth_policy or "full",), preferred_policies=(args.preferred_policy or "separate",),
+            pairs=data["pairs"] if args.full else select_sample(data["pairs"], args.per_grade, args.seed), require_population=args.full)
+        print(json.dumps({"status": report["status"], "report": str(output / "report.md")}))
+        if report["status"] != "complete":
+            raise SystemExit(1)
+        return
+    if args.ruleset == "v2" or args.annotation_corpus:
+        from src.scoring.v2_benchmark import run_benchmark
+        if args.ruleset == "v1" and (args.variant or args.relations or args.allow_provisional_relations):
+            parser.error("v2 variants/relations require --ruleset v2")
+        variant = (args.variant or "full") if args.ruleset == "v2" else "v1_reviewed"
+        corpus_path = args.annotation_corpus or ROOT / "output/scorer_v2/corpus.json"
+        selected = data["pairs"] if args.full else select_sample(data["pairs"], args.per_grade, args.seed)
+        report = run_benchmark(ROOT, as_of=args.as_of, corpus_path=corpus_path, output=args.output,
+                               relations_path=args.relations, allow_provisional_relations=args.allow_provisional_relations,
+                               variants=(variant,), pairs=selected, require_population=args.full)
+        print(json.dumps({"successful": report["variants"][variant]["all"]["successful"],
+                          "failed": report["variants"][variant]["all"]["failed"],
+                          "report": str(args.output / "report.md"), "provisional": report["provisional"]}, indent=2))
+        if report["status"] != "complete":
+            raise SystemExit(1)
+        return
+    if args.variant or args.relations or args.allow_provisional_relations:
+        parser.error("v2 variants/relations require --ruleset v2")
     cvs = {cv["cv_id"]: cv for cv in data["cvs"]}
     jobs = {jd["id"]: jd for jd in data["jobs"]}
     config = ScorerConfig()

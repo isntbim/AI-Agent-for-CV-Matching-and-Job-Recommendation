@@ -1,405 +1,222 @@
-# Explanation: the Phase 2 ATS scorer
+# Explanation: deterministic ATS scorer v1 and v2
 
-**Audience:** project developers and reviewers who need to understand how a CV–JD score is produced and what an improvement would change.
+**Audience:** developers and source-data reviewers. **Updated:** 2026-10-06.
+**Default:** `ats-en-v1`. **Optional ruleset:** `ats-en-v2`.
 
-**Updated:** 2026-10-01.
+V2 replaces the earlier weighted-skills proposal with the final policy in the implementation plan. The plan adopts the PDF's requirement weights and group shares, then adds explicit rules for evidence, proficiency, allocation, bonus and Core gates. This document specifies those rules; it makes no additional claim about the PDF's contents. Running commands and review steps are in [the ATS scorer guide](../guides/ats_scorer.md).
 
-**Current baseline:** `ats-en-v1`, with the full silver comparison evaluated as of 2026-09-30.
+The scorer consumes validated CV/JD envelopes and calculates seven scores with deterministic Python. Retrieval and reranker scores remain independent. No LLM, GPU or embedding model decides the ATS score. Extraction quality still matters: reproducible arithmetic cannot establish that an extracted fact is correct.
 
-This document explains the current implementation and its limitations, then proposes weighted skill matching. The proposal has not been implemented or validated. Implementation commands are maintained separately in [Running and evaluating the ATS scorer](../guides/ats_scorer.md).
+## Input contracts and evidence
 
-## Contents
+`ResumeInput` and `JobInput` retain `document` and `facts`. `Facts` contains supporting quotes, completed degrees, job constraints, professional domains and other evidence used by the unchanged dimension rules. V1 documents remain readable.
 
-1. [Purpose and implementation status](#1-purpose-and-implementation-status)
-2. [From CV/JD information to scorer inputs](#2-from-cvjd-information-to-scorer-inputs)
-3. [How the current scorer calculates results](#3-how-the-current-scorer-calculates-results)
-4. [Module responsibilities](#4-module-responsibilities)
-5. [GitHub references and project decisions](#5-github-references-and-project-decisions)
-6. [Current limitations and evaluation findings](#6-current-limitations-and-evaluation-findings)
-7. [Proposal: weighted skill matching](#7-proposal-weighted-skill-matching)
+V2 CV documents use `schema_version: resume-v2`. Each skill group retains its existing `keywords` and adds `details`: skill name, normalized proficiency, original proficiency wording, skill quote, proficiency quote and provenance. Keywords must agree with the detail list. The old group's `level` never supplies a proficiency value or a bonus for individual skills.
 
-## 1. Purpose and implementation status
+V2 JD documents use `schema_version: job-v2`. `document.skills.requirements` is the scoring source: stable requirement ID, one or more skill options, importance (`core`, `standard`, `preferred`), source quote, importance quote and review state. Existing required/preferred lists remain available to old consumers. The JD field `proficiency` still means required/preferred; it is not a candidate proficiency scale. V2 introduces no minimum skill-level requirement for JDs.
 
-The scorer evaluates a structured candidate CV against a structured job description. It returns seven component scores, a weighted total, a grade, evidence coverage, and matched/missing skills. Its score calculations are deterministic Python rules: the same inputs, configuration, code version and evaluation date produce the same result.
+The envelope's `annotation` records schema identity, source/text checksums, extraction completeness and review states. Skills-only approval and full-envelope approval are separate. A reviewer approving skills does not approve every CV/JD fact or turn the envelope into training gold.
 
-The implementation currently exists as local scoring modules and evaluation runners. The recorded tests demonstrate local behavior and offline comparison with silver labels. Web deployment and satisfactory production extraction quality remain separate Phase 2 integration and validation work.
+Quotes must exist in the source and support the specific skill or requirement. Core needs evidence of mandatory importance; a proficiency other than `normal` needs explicit wording tied to that skill. Standard is the default when a Required item has no supported Core classification. Defaults receive no invented quote. Validation detects quote problems, negation, inconsistent metadata, proficiency conflicts, duplicate requirements and ambiguous option groups. Literal quote validation does not replace human review of the interpretation.
 
-### Two different kinds of weight
+## Normalization, alternatives and allocation
 
-The current system does **not** give every score the same weight:
+Known aliases resolve before matching. Exact, normalized exact and equivalent aliases receive the same full credit: JS and JavaScript are equivalent. Unknown names can match by their normalized exact strings. Normalization removes duplicate CV skills and merges duplicate requirement units before calculating denominators. A duplicate with different importance retains the highest supported importance and records the merge.
 
-| Level | Current behavior |
-|---|---|
-| Seven ATS dimensions | Different weights: skills 30%, title 20%, experience 15%, education 10%, industry 10%, location 8%, salary 7% |
-| Individual required skills inside the skills dimension | Each unique canonical skill contributes equally |
-| Candidate skill proficiency | Stored in the CV schema, but does not affect matching credit |
-| Core versus Standard required skills | No such importance category is currently implemented |
+An `A OR B` requirement is one unit with two options and one weight; matching either option fulfills that unit. AND creates independent units. Overlapping option groups, unclear scopes and complex compound expressions require review before confirmation.
 
-Weighted skill matching would change the second row. It would not automatically change the skills dimension's 30% contribution to the overall score.
+One CV skill can fulfill at most one independent requirement. Allocation optimizes these objectives in order:
 
-### Qwen's place in the intended deployment flow
+1. Core fulfillment by exact/alias matching.
+2. All Required (Core and Standard) fulfillment by exact/alias matching.
+3. Remaining weighted Required fulfillment.
+4. Preferred fulfillment using remaining skills.
 
-The intended production flow is raw CV/JD text, Qwen extraction, validated structured inputs, normalization, and deterministic scoring. A later explanation step may use Qwen to turn the calculated scores and supporting evidence into readable feedback. That explanation should preserve the calculated results and stay within the supplied evidence.
+Sorted canonical names and stable requirement IDs resolve ties. Input ordering does not change the result.
 
-Qwen extraction can influence scores because missing or incorrectly interpreted input facts affect the rules. Deterministic arithmetic therefore does not guarantee correct inputs or a valid suitability judgment.
+Semantic relations are directed, versioned review records. They include candidate skill, target requirement skill, relation type, reason, source and approval status. Reversing a relation or chaining relations does not create another allowed relation. Approved relations are active by default; an explicit provisional option permits pending relations for diagnostics. Rejected relations remain inactive.
 
-**Gemini is a testing backend only. It is outside the deployment workflow.** The existing Gemini-labelled silver dataset is also an offline comparison source, rather than an input to the scoring calculation.
+| Match | Coefficient `m` | Counts for Core gate? |
+|---|---:|---|
+| Exact / normalized exact / alias | 1.00 | Yes |
+| Approved near relation | 0.70 | No |
+| Approved weak transfer relation | 0.40 | No |
+| No valid match | 0.00 | No |
 
-## 2. From CV/JD information to scorer inputs
+BGE-M3 can propose up to five neighbors per training-vocabulary skill for reviewer inspection. A high cosine score alone creates no runtime matching permission. The scorer only reads the relation table.
 
-### `document` preserves parsed information
+## Proficiency
 
-[`ResumeInput` and `JobInput`](../../src/scoring/models.py) each contain a `document` and `facts`:
+| CV proficiency | Fulfillment factor `f` | Bonus factor `b` |
+|---|---:|---:|
+| Beginner | 0.50 | 0 |
+| normal | 1.00 | 0 |
+| Intermediate | 1.00 | 0 |
+| Advanced | 1.00 | 0.10 |
+| Expert | 1.00 | 0.20 |
 
-| Input | `document` model | Examples of retained information |
-|---|---|---|
-| `ResumeInput` | [`ResumeSchema`](../../src/parser/schemas.py) | Basics, work history, education, grouped skills, projects, certificates, languages and summary |
-| `JobInput` | [`JobDescriptionSchema`](../../src/parser/job_schemas.py) | Identifiers, titles, company, location, seniority, skills, description, compensation, benefits and metadata |
+`normal` is neutral default behavior, not a claim of Intermediate capability. Senior titles, years, projects and a level attached to an entire skill group do not establish individual proficiency. Unmapped wording stays in the record and enters review; explicit conflicting levels must be resolved before confirmation. The factors describe this rubric's treatment of self-reported evidence, not independently measured ability.
 
-The wrapper contains the declared parser schema. It preserves fields such as a skill group's name and level even when the current rules do not use them. Arbitrary extra metadata is not guaranteed to remain in the validated document. The silver evaluation runner handles CV identifiers and pair-domain metadata separately.
+## V2 skills arithmetic
 
-The following is an illustrative fragment of the existing CV structure:
+There are two levels of weighting. Each requirement has weight `w`; each present group has a share in the skills score.
 
-```json
-{
-  "skills": [
-    {
-      "name": "Basic Knowledge",
-      "level": "Basic knowledge",
-      "keywords": ["HTTP", "OOP", "SOLID", "Design patterns"]
-    },
-    {
-      "name": "Frontend",
-      "level": null,
-      "keywords": ["HTML", "CSS", "JavaScript", "React"]
-    },
-    {
-      "name": "Development and Operations",
-      "level": null,
-      "keywords": ["Linux", "Git", "Docker", "Kubernetes", "AWS"]
-    }
-  ]
-}
-```
+| Requirement group | Weight per requirement `w` | Group share |
+|---|---:|---:|
+| Core | 1.00 | 70% |
+| Standard | 0.60 | 20% |
+| Preferred | 0.40 | 10% |
 
-`name` is a group heading. `level` is a stated proficiency. `keywords` contains the individual skills. The scorer collects the keywords across groups and normalizes them; it does not need to classify a heading as technical or soft to perform that comparison. A matching SOLID keyword currently receives the same matching credit whether its group says Basic or Advanced.
-
-### `Facts` adds interpretation and supporting evidence
-
-`Facts` is a companion to the parsed document. It stores information useful to the rules, including completed degrees, the job's minimum degree, professional domains, explicit country/currency, remote eligibility and explicit absence of experience/education requirements. It also groups supporting quotes by dimension.
-
-For education, a document entry might say “Bachelor of Science, expected graduation 2027.” The entry remains in `document.education`, while `facts.completed_degrees` should not count it as completed. A completed degree can be represented as `bachelor`, supported by the relevant source information.
-
-For skills, the actual skill list remains in `document.skills`. The following illustrates supporting evidence; it is not a complete scorer input:
-
-```json
-{
-  "evidence": {
-    "skills": [
-      {"quote": "Skills: Python, SQL, Excel"}
-    ]
-  }
-}
-```
-
-`facts.has("skills")` checks whether the dimension has evidence. It does not prove every listed skill is correctly extracted. The rules also need usable fields, and quotation validation checks whether quoted text occurs in the source. Neither check alone establishes semantic correctness or complete extraction.
-
-### Extraction and the offline silver adapter have different provenance
-
-The Qwen extraction path requests schema-conforming JSON and validates evidence quotations against the supplied text. Equivalent whitespace can be aligned with the original source span; changed wording is rejected. Failed extraction is reported as a failure, rather than assigned an invented score. Accepted extraction results can be cached with extraction identity and prompt/schema versions.
-
-The full silver comparison used [`silver.py`](../../src/scoring/silver.py) to construct inputs from stored structured CV/JD records. Its evidence consists of structured JSON values. Those values were not newly verified against original PDFs or raw JD text. This adapter also applies the existing JD title/seniority skill-tag filter. CV-domain and JD-category metadata are retained for comparison grouping, but are not supplied as scoring facts.
-
-## 3. How the current scorer calculates results
-
-### 3.1 Normalization
-
-[`normalization.py`](../../src/scoring/normalization.py) standardizes text and applies explicit mappings. Known skill aliases such as Python3/Python 3 and JS/JavaScript map to canonical names. Duplicate canonical skills count once. Unknown names can still match when their normalized strings are identical; unlisted synonyms are not automatically inferred.
-
-Role normalization removes recognized seniority words and looks up canonical roles and families. For example, Software Developer can map to Software Engineer in the software family. The vocabulary is finite, and title qualifiers can prevent an exact dictionary match. Country aliases similarly allow equivalent names such as USA and United States to be compared.
-
-The current baseline performs dictionary/set comparisons rather than semantic similarity scoring or reasoning about experience narratives.
-
-### 3.2 Component rules
-
-[`score_pair()` in `rules.py`](../../src/scoring/rules.py) calculates the following components. Scores are rounded to integers and bounded to 0–100.
-
-| Dimension | Current calculation | Important boundary |
-|---|---|---|
-| Skills | `100 × matched targets / total targets`. Targets are unique canonical required skills; preferred skills are targets only when no required skills exist. | Matching requires skill evidence on both sides. Preferred coverage is reported separately and does not add a bonus to a required-skill score. Proficiency is ignored. |
-| Title | Same canonical role 100; different roles in the same recognized family 70; recognized different families 0; insufficient mapping/evidence 50. | The CV headline takes precedence. Otherwise, use the latest dated work title. |
-| Experience | Relevant months divided by required months, capped at 100. Explicitly no experience required gives 100. | Relevant work uses the JD role/family. Overlapping intervals count once. Ambiguous roles or missing/invalid dates can make duration unknown. |
-| Education | Highest completed degree meets/exceeds minimum: 100; one rank below: 50; two or more below: 0. Explicitly no education required gives 100. | Degree order is high school, associate, bachelor, master, doctorate. Field of study and equivalent-experience substitutions are not scored. |
-| Industry | `100 × shared professional domains / identified JD professional domains`. Unknown gives 50. | The `industry` key means professional alignment, such as software or finance, rather than employer sector. |
-| Location | Explicit compatible country/city or remote eligibility: 100; explicit incompatibility: 0; incomplete constraints: 50. | Remote does not automatically imply worldwide eligibility. Distance, relocation willingness and personal preferences are not currently modeled. |
-| Salary | Negotiable/unknown/incomparable currency: 75. Explicit expectation within JD maximum: 100. Above maximum: `100 × JD maximum / expectation`. | Candidate salary preference is separate input. Monthly/annual values are normalized; currency conversion is not performed. |
-
-### 3.3 Why all required skills contribute equally today
-
-Suppose the JD requires React, Docker, MySQL and Python, while the CV demonstrates React, Docker and MySQL. With sufficient evidence:
+For each present group `g`:
 
 ```text
-Unique required skills: 4
-Matched required skills: 3
-Skills score: 100 × 3 / 4 = 75
+F_g = sum(w_i * m_i * f_i) / sum(w_i)
 ```
 
-Each match contributes one unit. The current formula does not give Docker more credit because it seems harder, or reduce credit for a skill marked Basic. Group names such as Frontend and Backend also do not affect this calculation.
-
-The missing-skill list describes missing matches in the supplied skill data. It does not establish that the candidate lacks a skill in real life; the extractor or source CV may have omitted it.
-
-### 3.4 Employment dates and reproducibility
-
-Experience uses the union of relevant dated work intervals. January 2020–January 2023 and January 2022–January 2024 produce 48 months, rather than 60 months. Months are calculated as end-month minus start-month.
-
-`Present` uses the caller's explicit `as_of_date`. Year-only employment dates, missing end dates, invalid/future dates and uncertain role relevance can produce an unknown result. A missing end date is not implicitly Present. A fully recognized unrelated work history contributes zero relevant months; an empty history can be incomplete extraction and stays unknown.
-
-The fixed date matters for reproducibility. A historical CV that still says Present may overstate current tenure when evaluated years later.
-
-### 3.5 Missing information, evidence and coverage
-
-Unknown dimensions receive 50, except salary, which receives 75. Their original weights remain in the total. A demonstrated mismatch can receive 0; missing information should not be treated as a demonstrated mismatch.
-
-Each dimension result records its score, support flag, calculation basis, rule ID and evidence. The support flag depends on whether the rule has sufficient usable facts, not merely whether an evidence object exists.
-
-Coverage is the sum of the weights of supported dimensions. If skills and title alone are supported, coverage is 30% + 20% = 50%. Coverage is not a confidence probability and does not independently verify extraction accuracy.
-
-An all-unknown input receives seven defaults whose weighted total rounds to **51.8**, with **zero coverage** and a **Partial** grade. The current grade calculation has no minimum-coverage gate. Scores and grades therefore need to be presented with coverage and missing-evidence information.
-
-### 3.6 Overall score and grade
-
-Weights are defined in [`match_schemas.py`](../../src/parser/match_schemas.py):
+All requirements inside one group have equal weights, so `w` cancels within that group's fulfillment. After computing fulfillment, group shares determine how much each group contributes. Multiplying by 1/0.6/0.4 again would incorrectly apply requirement importance twice.
 
 ```text
-Total = skills × 0.30 + title × 0.20 + experience × 0.15
-      + education × 0.10 + industry × 0.10
-      + location × 0.08 + salary × 0.07
+normalized_share_g = original_share_g / sum(original_share of present groups)
+base_skills = 100 * sum(normalized_share_g * F_g)
 ```
 
-The total is rounded to one decimal. Default grade rules are:
-
-| Grade | Condition |
+| Groups present | Normalized shares |
 |---|---|
-| Strong (`2`) | Total at least 75, skills at least 70 and title at least 70 |
-| Partial (`1`) | Total at least 50, but Strong conditions are not satisfied |
-| Mismatch (`0`) | Total below 50 |
+| Core, Standard, Preferred | 70% / 20% / 10% |
+| Core, Standard | 77.78% / 22.22% |
+| Core, Preferred | 87.5% / 12.5% |
+| Standard, Preferred | 66.67% / 33.33% |
+| Any one group | 100% for that group |
 
-A hypothetical component result illustrates both weighted aggregation and unknown defaults:
+An absent group has fulfillment `null`, not zero. Preferred contributes to the base score. With all three groups, its maximum base contribution is ten points; a Preferred-only JD is scored entirely from Preferred fulfillment.
 
-| Component | Score | Weighted contribution | Supported? |
-|---|---:|---:|---|
-| Skills | 75 | 22.50 | Yes |
-| Title | 70 | 14.00 | Yes |
-| Experience | 83 | 12.45 | Yes |
-| Education | 100 | 10.00 | Yes |
-| Industry | 100 | 10.00 | Yes |
-| Location | 50 | 4.00 | No: unknown |
-| Salary | 75 | 5.25 | No: negotiable default |
-| **Total** | **78.2** | **78.20** | **85% coverage** |
+### Proficiency bonus
 
-This receives Strong under the current gates. Conversely, an unknown title scores 50 and prevents Strong, even if the total exceeds 75. The grade is a rubric classification, not a probability of recruitment success.
+Only an Advanced/Expert CV skill exactly matching a Core or Standard requirement creates a bonus. Preferred matches, semantic matches and skills outside the JD do not create a bonus.
 
-## 4. Module responsibilities
-
-| Module | Role in Phase 2 |
-|---|---|
-| [`models.py`](../../src/scoring/models.py) | Input/output contracts, evidence, preferences, configuration, grade and coverage helpers |
-| [`normalization.py`](../../src/scoring/normalization.py) | Canonical skills, roles/families and countries |
-| [`rules.py`](../../src/scoring/rules.py) | Seven component calculations and assembly of the final result |
-| [`extraction.py`](../../src/scoring/extraction.py) | Preprocessing: extraction requests, validation and caches, including local model adapters |
-
-The first three form the core scoring system. Extraction prepares its inputs. Natural-language explanation is a further consumer of the scorer output, rather than a calculation inside `score_pair()`.
-
-Other modules serve offline/testing purposes: `gemini.py` supplies the testing backend; `silver.py` adapts stored silver records; `dataset.py` prepares evaluation data; `evaluation.py` measures agreement and supports development calibration. Their presence in the repository does not make Gemini part of production deployment.
-
-The scorer result includes component scores, overall score, grade, coverage, matched/missing skills, preferred coverage, per-dimension reasons/evidence/rule IDs, configuration and evaluation date. These fields allow a web interface or explanation generator to show the basis and uncertainty of a result.
-
-## 5. GitHub references and project decisions
-
-The implementation references selected methods from [Sara12-2/ResumeMatch_AI](https://github.com/Sara12-2/ResumeMatch_AI/tree/a30c9e32c0d801b0b2a48f3b8883245ad67636b7), pinned at commit `a30c9e32c0d801b0b2a48f3b8883245ad67636b7`. No upstream source code or taxonomy assets have been copied or imported. Attribution is maintained in [scorer_references.md](../reference/scorer_references.md).
-
-| Dimension | Exact GitHub code used as a method reference | Adopted idea and reason | Project-specific changes |
-|---|---|---|---|
-| Skills (`R1`) | [`_get_matcher()`, `_build_matcher()`, `extract_skills()`, `analyze_skill_gap()` in `src/skill_extractor.py`](https://github.com/Sara12-2/ResumeMatch_AI/blob/a30c9e32c0d801b0b2a48f3b8883245ad67636b7/src/skill_extractor.py) | Canonical aliases and set intersection/difference make matched/missing skills inspectable. | Our dictionary, structured required/preferred handling, evidence defaults and scoring targets; no spaCy PhraseMatcher or upstream taxonomy import. |
-| Education (`R2`) | [`highest_degree_level()` in `src/skill_extractor.py`](https://github.com/Sara12-2/ResumeMatch_AI/blob/a30c9e32c0d801b0b2a48f3b8883245ad67636b7/src/skill_extractor.py) and [`EnhancedATSScore._compute_education_match()` in `src/ats_score.py`](https://github.com/Sara12-2/ResumeMatch_AI/blob/a30c9e32c0d801b0b2a48f3b8883245ad67636b7/src/ats_score.py) | Degree ranking and attainment comparison are easier to audit than whole-document similarity. | Completed-degree/minimum-requirement handling and 100/50/0 scores; no upstream semantic score or degree-match floor. |
-| Industry (`R3`) | [`detect_domains()`, `_get_domain_matcher()` in `src/skill_extractor.py`](https://github.com/Sara12-2/ResumeMatch_AI/blob/a30c9e32c0d801b0b2a48f3b8883245ad67636b7/src/skill_extractor.py) and [`EnhancedATSScore._compute_project_relevance()` in `src/ats_score.py`](https://github.com/Sara12-2/ResumeMatch_AI/blob/a30c9e32c0d801b0b2a48f3b8883245ad67636b7/src/ats_score.py) | Canonical domain labels and overlap give an inspectable alignment method. | Our professional families and JD-domain coverage formula; no project-relevance floor. |
-
-Title (`P1`), experience (`P2`), location (`P3`) and salary (`P4`) are project rules. The seven dimension weights, neutral defaults, evidence coverage, grade thresholds and Strong gates are also project decisions. Numeric rules are hypotheses requiring evaluation; a GitHub reference does not validate their suitability for this project's jobs and candidates.
-
-## 6. Current limitations and evaluation findings
-
-### Full silver comparison
-
-The 2026-09-30 audit scored all **1,672 pairs**, involving **88 CVs and 353 JDs**, with zero scoring failures and zero model/API calls. It used stored structured records, rather than a fresh Qwen extraction run. No weights, thresholds or mappings were tuned using this comparison.
-
-The labels comprise 1,144 Gemini-labelled pairs and 528 heuristic negatives. Heuristic negative subscores were generated from ranges; they are a different comparison source from Gemini's judgments.
-
-| Comparison source | Pairs | Grade agreement | Always-majority baseline | Total-score MAE | Spearman rank correlation |
-|---|---:|---:|---:|---:|---:|
-| Gemini only | 1,144 | 59.3% | 57.5% | 14.67/100 | 0.208 |
-| Heuristic negatives | 528 | 96.8% | 100.0% | 15.36/100 | -0.015 |
-| Combined | 1,672 | 71.1% | 70.9% | 14.89/100 | 0.211 |
-
-Combined agreement is only slightly above always predicting Mismatch. Macro F1 is 0.316 on Gemini pairs and 0.346 overall. The system produced 1,543 Mismatch, 129 Partial and zero Strong grades, while silver labels contain 1,186 Mismatch, 452 Partial and 34 Strong.
-
-On Gemini-labelled pairs, mean scores by silver grade are:
-
-| Silver grade | Pairs | Gemini mean | Runtime mean |
-|---|---:|---:|---:|
-| Mismatch | 658 | 33.2 | 39.4 |
-| Partial | 452 | 61.5 | 41.5 |
-| Strong | 34 | 79.3 | 45.1 |
-
-The runtime means increase with silver grade, but the separation is small and the runtime totals are compressed. Zero Strong predictions are consistent with those low totals and limited title/skill support.
-
-### What needs investigation
-
-- **Title vocabulary:** only 12/1,144 Gemini pairs have supported title scores, approximately 1.0%. Most titles use neutral defaults. Industry support is 23/1,144, approximately 2.0%; both dimensions depend partly on recognized role families.
-- **Skill representation:** 833/1,144 Gemini pairs receive zero skills scores. Literal coverage, unrecognized aliases, missing extracted skills, multilingual or corrupted tags, and genuine mismatch can all contribute. A zero score alone does not identify which cause applies.
-- **Current evidence coverage:** Gemini-only experience support is about 10.8%. Many results therefore combine explicit matches with neutral assumptions.
-- **Equal skill contribution:** missing a central requirement has the same effect as missing any other required skill. Whether weighting helps requires suitable importance annotations and comparison data.
-- **Proficiency:** a Basic claim and an Advanced claim currently earn identical presence credit. This can overstate suitability when a JD requires a specific depth.
-- **Correlated dimensions:** title, professional domain and relevant experience reuse role-family recognition, so these are not independent signals.
-- **Source quality:** evidence extracted from text or adapted from JSON can be incomplete or incorrectly interpreted. Qwen's extraction behavior must be evaluated separately from score arithmetic.
-
-The base Qwen smoke tests produced extraction validation failures, including nonliteral evidence quotes. Training and prompt work should address schema compliance, quotation fidelity, uncertainty handling and extraction completeness. These observations do not establish successful end-to-end Qwen scoring. See [base_qwen_observations.md](../reports/model-extraction/base_qwen_observations.md).
-
-The silver audit measures agreement with Gemini and heuristics. It is not held-out validation against observed hiring decisions or an independent review, and does not identify which scorer is correct. The 88 CVs and repeated JDs also make pair results dependent. The small balanced sample previously discussed should not be used as the full population estimate.
-
-Local audit artifacts, when generated, are stored under `output/ats/silver_full/eda/`: `report.html` (interactive EDA), `report.md` (Markdown EDA), `pair_comparison.csv` (complete paired scores), and `summary.json` (recorded summary). These generated files are ignored by Git and will not be available in a fresh clone until regenerated.
-
-## 7. Proposal: weighted skill matching
-
-**Status: proposal only.** The current scorer, schemas and extractor do not implement Core/Standard importance or proficiency-adjusted matching. The design below is a candidate improvement, not an approved numerical rubric or a demonstrated performance gain.
-
-### 7.1 Weight job importance, not universal difficulty
-
-A skill matters because of the job's requirements. Kubernetes can be central to an infrastructure role and irrelevant to another role. Communication can be central to a customer-facing role. Technical versus soft classification does not determine importance.
-
-Three separate concepts should remain distinguishable:
-
-| Concept | Question | Proposal stage |
-|---|---|---|
-| Job importance | How important is this skill to this JD? | First weighted-matching proposal |
-| Candidate proficiency | Does the candidate demonstrate sufficient depth? | Separate later proposal |
-| Global difficulty | Is this skill generally difficult to learn? | No universal difficulty scale selected |
-
-### 7.2 Proposed categories and initial weights
-
-| Skill requirement | Candidate policy | Illustrative numerical weight |
-|---|---|---:|
-| Core required | Explicitly identified as essential/central under a documented policy | 5 |
-| Standard required | Other required skills, including uncertain importance | 2 |
-| Preferred | Retain in the existing preferred list and report separate coverage | Outside the required-score denominator |
-
-The 5:2 ratio is an example, not a validated setting. It should be versioned and evaluated. When a JD has no required skills, the current preferred-only fallback needs an explicit backward-compatible policy; a proposed first implementation would keep equal weighting of those preferred targets.
-
-“Required” establishes that a skill is expected; it does not automatically distinguish it as Core relative to every other required skill. If a JD labels every skill essential, the extractor should reflect the source rather than force a ranking. Equal importance categories then give equal matching credit.
-
-### 7.3 Proposed JD schema and evidence
-
-Importance belongs to individual JD requirements. The CV groups remain unchanged. The following is a proposed fragment, not valid current-schema output:
-
-```json
-{
-  "required": [
-    {
-      "name": "Kubernetes",
-      "importance": "core",
-      "importance_evidence": "Operating Kubernetes clusters is essential to this role."
-    },
-    {
-      "name": "Git",
-      "importance": "standard"
-    },
-    {
-      "name": "Communication",
-      "importance": "standard"
-    }
-  ]
-}
-```
-
-Implementation would extend the JD skill model with a constrained importance category and define where per-skill importance evidence lives, either alongside the requirement or in a structured Facts extension. Importance evidence must identify the source requirement it supports. A single generic skill-evidence quote is insufficient to justify a separate Core claim for every skill.
-
-For older records with no importance, every required skill would default to Standard. Because all weights would then be equal, the weighted formula would reproduce the existing count-based score. Existing missing-evidence defaults should remain explicit and unchanged in the first comparison.
-
-### 7.4 Qwen's proposed classification role
-
-Qwen would extract the skill, its required/preferred status, proposed importance and supporting source text. Code would validate the category/evidence structure and translate categories into configured numerical weights. Qwen would not invent numerical weights or alter the calculated ATS score.
-
-The first policy should emphasize explicit source statements. Ambiguous importance defaults to Standard and is recorded as defaulted. Classifying importance from broad role context is a possible later extension that needs its own annotation policy and evaluation.
-
-Importance should be assigned using the JD independently of the candidate's skill coverage. Otherwise, the same job could receive different weights for different applicants. Extracting and caching the JD once per version helps enforce consistency. Neither silver grades nor teacher subscores should enter that classification request.
-
-Source-quote validation establishes that a quote exists. It does not prove that the quote makes a skill Core. Category correctness therefore needs separate review and evaluation. Since the base Qwen model already exhibited evidence errors, importance extraction is a new task to evaluate and potentially train; it should not be assumed reliable from the model name alone.
-
-### 7.5 Proposed weighted calculation
-
-For canonical target skills with positive weights:
+Let `e_i` be one for exact/alias and zero otherwise; `W_required` is the sum of Core and Standard requirement weights.
 
 ```text
-Skills score = 100 × sum(weights of matched target skills)
-                   / sum(weights of all target skills)
+bonus = min(5, 25 * sum(w_i * e_i * f_i * b_i) / W_required)
+skills_before_gate = min(100, base_skills + bonus)
 ```
 
-Using the proposed example, a CV matches Git and Communication but misses Kubernetes:
+If there is no Required group, bonus is zero. Fully matching Required skills at Advanced adds at most 2.5 points; Expert adds at most five. Skills always remain at most 100.
+
+Example: Core Python; Standard SQL and Docker; Preferred Kubernetes. The CV has Python Expert and SQL normal, with no valid Docker/Kubernetes match.
 
 ```text
-Equal-weight score:     100 × 2 / 3 = 67 after component rounding
-Weighted score:        100 × (2 + 2) / (5 + 2 + 2) = 44 after rounding
+F_core = 1; F_standard = 0.5; F_preferred = 0
+base_skills = 100 * (0.70 * 1 + 0.20 * 0.5 + 0.10 * 0) = 80
+W_required = 1 + 0.6 + 0.6 = 2.2
+bonus = 25 * (1 * 0.20) / 2.2 = 2.2727...
+skills_before_gate = 82.2727...
 ```
 
-Missing Kubernetes has more effect because this JD identifies it as Core. The skills dimension would still contribute 30% to the overall total unless a separate change is proposed and evaluated.
+### Core gate
 
-Normalization must preserve importance metadata. A plain set of names is insufficient for weighted targets. A canonical weight map can retain it:
+Core fulfillment for the base score may contain semantic credit. Gate fulfillment is a separate calculation using exact/alias credit and the Beginner factor only:
 
-```python
-# Illustrative intermediate representation for the proposal.
-required_weights = {
-    "kubernetes": 5,
-    "git": 2,
-    "communication": 2,
-}
+```text
+core_gate_fulfillment = sum(w_i * e_i * f_i for Core) / sum(w_i for Core)
 ```
 
-Aliases should resolve before aggregation. Duplicate requirements must count once. A candidate first policy is to retain the highest supported importance for a canonical skill and report conflicting annotations for inspection, rather than add duplicate weights. Unsupported Core claims should follow an explicit validation/default policy.
-
-An empty target set must follow the existing unknown/preferred fallback policy rather than divide by zero. Configured weights must be positive. Equal-weight, missing-evidence and alias behaviors should be tested before comparing model quality.
-
-### 7.6 Implementation responsibilities
-
-| Area | Proposed change |
+| Gate fulfillment | Result |
 |---|---|
-| `src/parser/job_schemas.py` | Add per-skill importance fields and validation/defaults |
-| `src/scoring/models.py` | Define versioned importance-weight configuration and any Facts/output extensions |
-| Normalization and `rules.py` | Preserve weights through canonicalization, deduplicate, and replace count coverage with weighted coverage |
-| `extraction.py` and its prompt/schema contract | Request importance and per-skill evidence; validate and record uncertain/defaulted classifications |
-| Cache identity/versioning | Increment relevant prompt, schema and rule versions so old extraction/configuration is not mistaken for the new design |
-| Output/web consumers | Show importance, weight, match status, evidence, and contributions for individual skills |
-| Offline evaluation | Compare equal and weighted rules on the same annotated inputs, keeping teacher scores out of the calculations |
+| At least 70% | `passed`; no Core limitation |
+| At least 50%, below 70% | `failed`; skills capped at 49; Strong blocked |
+| Below 50% | `failed`; skills capped at 49; grade forced to Mismatch (`0`) |
+| No Core requirements | `not_applicable` |
+| Required evidence incomplete | `unknown`; no invented Core failure |
 
-Gemini can remain a testing option for comparisons; the proposed deployed extractor remains Qwen. Existing silver records need importance annotations before they can exercise the new weighting meaningfully. Simply defaulting every requirement to Standard preserves the old score and provides no test of importance classification.
+The exact boundaries matter: 50% avoids the forced Mismatch but remains capped; 70% passes. Bonus and semantic matches cannot rescue a failed gate. The scorer evaluates gate ratios before rounding.
 
-### 7.7 Evaluation before adoption
+No skill requirements or insufficient CV/JD skill evidence produces neutral skills 50 with an unsupported basis. Missing extraction is distinct from a complete, supported annotation with no valid match. The former never establishes that the candidate lacks Core skills.
 
-The first comparison should isolate importance weighting from other changes:
+## Overall score and grade
 
-1. Establish an annotation policy and review JD skill-importance/evidence examples. Label importance independently of candidate matches and silver scores.
-2. Measure Qwen's skill extraction, required/preferred classification, importance classification, evidence fidelity and failure rate separately. Record ambiguous cases for later training.
-3. Verify calculation contracts: equal weights reproduce the baseline; aliases/duplicates count once; missing Core hurts more than missing Standard; unchanged facts preserve other dimensions; empty/missing data remains explicit.
-4. Compare equal and weighted rules on the same structured inputs with fixed non-skill rules and fixed initial grade thresholds. This isolates the effect of importance weighting.
-5. Tune any category weights or thresholds on development data only. Keep CV/JD identities isolated across development and a separately reserved test set, and avoid treating the already inspected silver audit as independent validation.
-6. Report grade macro F1, per-grade recall, majority baselines, continuous-score/rank agreement, coverage, extraction failures and representative errors. Agreement with Gemini remains teacher agreement; independently reviewed suitability or observed outcomes are needed for stronger real-world claims.
+V2 changes the skills pipeline only. The other six dimension formulas and overall weights remain the v1 rules:
 
-Weighted matching will not fix missing skills or unrecognized titles. Those problems need separate diagnosis and versioned changes so their effects can be distinguished. With the current Strong title gate, improving skill weighting alone may still leave suitable pairs unable to reach Strong.
+| Dimension | Overall share | Formula |
+|---|---:|---|
+| Skills | 30% | Selected v1 or v2 skills rules |
+| Title | 20% | Same recognized role 100; same recognized family 70; different families 0; unknown 50 |
+| Experience | 15% | Relevant non-overlapping months / required months, capped at 100; explicitly none required 100 |
+| Education | 10% | Completed degree meets minimum 100; one rank below 50; at least two below 0 |
+| Industry | 10% | Shared professional domains / identified JD domains; unknown 50 |
+| Location | 8% | Supported compatible constraints 100; incompatible 0; unknown 50 |
+| Salary | 7% | Within comparable maximum 100; above maximum proportional; negotiable/unknown 75 |
 
-### 7.8 Separate later proposals
+Experience uses the fixed `as_of_date` for Present; overlapping intervals count once. Missing dates are not automatically Present. Remote does not imply worldwide eligibility. Schema-default country/currency values do not supply evidence. Industry means professional alignment rather than the employer's business sector.
 
-**Proficiency-aware matching:** candidate levels such as Basic and Advanced could be compared with explicit JD depth requirements. This requires a consistent proficiency scale, source evidence and an agreed partial-credit policy. No scale or factor has been selected. A self-reported level alone does not prove production capability.
+Components are integers; the overall score uses those components and rounds to one decimal. V2 breakdowns retain arithmetic before component rounding. Coverage is the sum of supported dimension weights, not a confidence probability.
 
-**Insufficient-evidence presentation:** a later web integration could introduce a review/insufficient-information status alongside the existing grade when coverage is low. This would need an explicit policy and schema/output design. It is not a current grade rule.
+| Grade | Final rule |
+|---|---|
+| Strong (`2`) | Overall at least 75; skills at least 70; title at least 70; Core gate does not block Strong |
+| Partial (`1`) | Overall at least 50 and Core gate does not force Mismatch |
+| Mismatch (`0`) | Overall below 50 or Core gate forces Mismatch |
 
-**Alias and domain improvements:** expand vocabulary from reviewed failures and improve qualifier handling. Maintain provenance and inspect effects across occupations, rather than silently substituting pair-domain labels for source facts.
+There is no new experience >=60 gate or undefined severe-mismatch rule. Runtime, calibration and evaluation use the same grade/gate helper.
 
-The proposal's intended outcome is an auditable score whose skill contributions reflect explicit job importance. Adoption depends on trustworthy annotations, measured extraction quality and evaluation beyond the original teacher-labelled comparison.
+## V1 compatibility and output
+
+`ScorerConfig()` still chooses v1. Its skills score is unique canonical required-skill coverage; Preferred becomes the target set only when no required skills exist. V1 ignores skill proficiency and has no Core gate. Older schemas and the original silver adapter remain supported.
+
+V2 is selected explicitly with `ScorerConfig(version="ats-en-v2")`. It returns all existing result fields plus `skills_breakdown`: requirement matches and chosen options; group fulfillment; Core gate fulfillment; base score; bonus; pre/post-gate scores; full/partial/unmet status; evidence, provenance, checksums, rule/relation versions and review status. Template explanations describe the calculated values. No LLM decides points.
+
+The main implementation modules are [models.py](../../src/scoring/models.py), [rules.py](../../src/scoring/rules.py), [skills_v2.py](../../src/scoring/skills_v2.py), [skill_v2.py](../../src/parser/skill_v2.py), [v2_corpus.py](../../src/scoring/v2_corpus.py) and [v2_benchmark.py](../../src/scoring/v2_benchmark.py). Extraction prompts, schema/adapter identities and cache identities distinguish v1 from v2.
+
+Existing attribution and baseline method references are retained in [scorer_references.md](../reference/scorer_references.md).
+
+## Review corpus and benchmark interpretation
+
+The v2 corpus preserves all 88 CV and 361 JD identities, source/text checksums and split assignments. `before` preserves the original v1 envelope; `envelope` contains source-backed v2 annotations and inherited resolved pilot decisions. Source problems outside skills are recorded separately so their impact is visible in the v1 original-to-reviewed comparison.
+
+Prepared annotations are provisional until you or a teammate accepts, corrects or rejects them. Empty review cells remain pending. Imports validate document/checksum identity and are idempotent; stale decisions are refused. Only fully approved envelopes in the training partition may be exported for training. This implementation includes no Qwen training, VietJobs ingestion, web integration, Azure changes or new experience gate.
+
+The fixed offline benchmark keeps the original 1,672 pair labels. Primary reporting uses the 1,144 Gemini pairs; 528 heuristic negatives are reported separately. Seven ablations separate source corrections, group weighting, semantics, proficiency and Core gates:
+
+1. V1 on original data.
+2. V1 on source-reviewed data.
+3. V2 with equal shares among present groups; no semantics, proficiency or gates.
+4. V2 with 70/20/10 shares.
+5. Add approved semantic relations.
+6. Add proficiency and bonus.
+7. Add Core gates: full v2.
+
+Reports include grade macro-F1, balanced accuracy, per-grade precision/recall, confusion matrices, score distributions, coverage, every failure, latency, source/grade changes, domains and the 24 historical disagreements. Code, annotation/source checksums, relation table, configuration, selected pairs and date form a report identity. Artifacts from different identities cannot be combined.
+
+These are diagnostics on previously inspected silver data. Agreement is not independent test accuracy or correctness against hiring outcomes. Pending review, extraction incompleteness and the use of Core/proficiency/semantic rules remain explicit in the report. V1 stays the default while the v2 code and provisional review package are handed off.
+
+## Optional v3 depth extension
+
+V3 adds explicit, skill-specific JD minimum proficiency independently of
+Core/Standard/Preferred importance. OR options may have different minima. The
+three explicit ranks are Intermediate/Advanced/Expert; `normal` is unknown.
+Literal Beginner wording now maps to normal in v3, preserving `raw_proficiency`
+and its quote. It receives full existing fulfillment, no depth gap and no bonus.
+For exact/alias matches, gaps of 0/1/2 levels receive 1/.75/.50 depth credit.
+Unknown CV levels keep existing credit;
+semantic matches keep existing credit but cannot prove required-skill depth.
+
+Full v3 uses effective fulfillment in allocation, base skills and Core gating.
+Advanced/Expert bonuses require the match to meet any explicit minimum; without
+a minimum, legacy eligibility remains. The unrounded .5/.7 Core boundaries are
+unchanged. `score_only` changes allocation/base skills while retaining legacy
+bonus/gate factors; `off` preserves equivalent supported v2 arithmetic. Literal
+Beginner normalization is an intentional v3 difference, including in `off`. V1 remains
+the runtime default, and v2's verified source, receipts and artifacts are frozen.
+
+Skill-specific experience years are recorded but unscored. Titles nominate
+review; explicit human item approval may resolve a title choice. Titles alone
+cannot establish proficiency depth. Direct approvals, rule-derived changes and whole-envelope approval are
+kept separate. All material changes and positive/negative experiment outcomes
+are saved in the [research package](../research/ats_scorer/README.md), with
+[methodology](../research/ats_scorer/methodology.md),
+[results](../research/ats_scorer/results.md) and
+[unresolved reviews](../research/ats_scorer/unresolved_review.json).
+
+### 2026-10-08 v3 review correction
+
+Depth-enabled alternatives now use the same ordered allocation objectives as global matching, so a semantic alternative cannot displace the exact Core or Standard objective solely because its weighted credit is higher. Preferred alternatives retain weighted selection, and depth-off preserves v2 behavior. Negated depth claims and rejected CV details cannot provide positive proficiency credit. Missing evidence remains unknown. [The remediation record](../research/ats_scorer/remediation_2026-10-08.md) documents the policy, tests and unchanged silver-data results.

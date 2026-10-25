@@ -12,6 +12,7 @@ from pathlib import Path
 from src.parser.extractors import (
     PDFExtractor,
     DOCXExtractor,
+    clean_text,
     extract_text_from_file,
 )
 
@@ -232,3 +233,10 @@ class TestExtractTextFromFile:
             pytest.skip("No DOCX files available")
         text = extract_text_from_file(files[0])
         assert isinstance(text, str)
+
+
+def test_clean_text_repairs_pdf_text_layer_artifacts():
+    assert clean_text("CafÃ©, orientedÂ who skills.Â\nAreas") == "Café, oriented who skills.\nAreas"
+    assert clean_text("Microsoft​ Office -­ Jan") == "Microsoft Office - Jan"
+    assert clean_text("Master’s – C++ ©") == "Master’s – C++ ©"  # real non-ASCII stays
+    assert clean_text("Aug 2015 (cid:21) May 2019 (cid:3)(cid:3)x") == "Aug 2015   May 2019  x"

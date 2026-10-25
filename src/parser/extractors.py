@@ -33,6 +33,26 @@ try:
 except ImportError:  # pragma: no cover
     DocxDocument = None  # type: ignore[assignment,misc]
 
+# Below this share of spaces a page's words are glued together (normal CV text is ~12-15%).
+GLUED_SPACE_RATIO = 0.06
+# Text-layer artifacts: zero-width marks and soft hyphens, and UTF-8 text stored as cp1252
+# ("CafÃ©" for "Café", "Â " for a no-break space).
+_INVISIBLE = re.compile(r"[​-‍⁠﻿­]")
+_MOJIBAKE = re.compile(r"[Â-ô][\u0080-¿ŒœŠšŸŽžƒˆ˜"
+                       r"–—‘-„†-•…‰‹›€™]{1,3}")
+
+
+def clean_text(text: str) -> str:
+    """Remove invisible marks and repair cp1252-decoded UTF-8; anything that does not round-trip stays."""
+    def repair(match: re.Match) -> str:
+        try:
+            return match.group(0).encode("cp1252").decode("utf-8")
+        except UnicodeError:
+            return match.group(0)
+    text = _MOJIBAKE.sub(repair, _INVISIBLE.sub("", text))
+    text = re.sub(r"(?:\(cid:\d+\))+", " ", text)  # pdfminer's name for a glyph with no unicode mapping (bullets, dashes)
+    return re.sub(r"Â(?=[\s·]|$)", "", text)  # the lead byte of a no-break space that became a plain space
+
 
 # ---------------------------------------------------------------------------
 # Internal Data Structures
@@ -98,13 +118,24 @@ class PDFExtractor:
         if not path.exists():
             raise FileNotFoundError(f"PDF file not found: {path}")
 
+        text = self._extract_all(path, x_tolerance=3)
+        # Some PDFs set character spacing below pdfplumber's default gap, so words come out glued
+        # ("BachelorofScience"); a tighter tolerance restores the spaces.
+        if text and text.count(" ") / len(text) < GLUED_SPACE_RATIO:
+            retry = self._extract_all(path, x_tolerance=1)
+            if retry.count(" ") / max(1, len(retry)) > text.count(" ") / len(text):
+                logger.debug(f"'{path.name}': glued text, re-extracted with x_tolerance=1.")
+                text = retry
+        return clean_text(text)
+
+    def _extract_all(self, path: Path, x_tolerance: float) -> str:
         page_texts: list[str] = []
         try:
             with pdfplumber.open(str(path)) as pdf:
                 logger.debug(f"Opened PDF '{path.name}' — {len(pdf.pages)} page(s).")
                 for i, page in enumerate(pdf.pages):
                     try:
-                        page_text = self._extract_page(page)
+                        page_text = self._extract_page(page, x_tolerance)
                         if page_text.strip():
                             page_texts.append(page_text)
                         logger.debug(f"  Page {i + 1}: {len(page_text)} chars extracted.")
@@ -119,19 +150,19 @@ class PDFExtractor:
     # Per-Page Extraction
     # ------------------------------------------------------------------
 
-    def _extract_page(self, page: Page) -> str:
+    def _extract_page(self, page: Page, x_tolerance: float = 3) -> str:
         """Extract text from a single page in correct reading order."""
         regions = self._detect_regions(page)
 
         if not regions.has_two_columns:
-            return page.extract_text() or ""
+            return page.extract_text(x_tolerance=x_tolerance) or ""
 
         sections: list[str] = []
 
         # Header (full-width)
         if regions.y_header_bottom > 0:
             text = self._crop_extract(
-                page, 0, 0, page.width, regions.y_header_bottom
+                page, 0, 0, page.width, regions.y_header_bottom, x_tolerance
             )
             if text:
                 sections.append(text)
@@ -143,6 +174,7 @@ class PDFExtractor:
             regions.y_header_bottom,
             regions.x_split,
             regions.y_footer_top,
+            x_tolerance,
         )
         if text:
             sections.append(text)
@@ -154,6 +186,7 @@ class PDFExtractor:
             regions.y_header_bottom,
             page.width,
             regions.y_footer_top,
+            x_tolerance,
         )
         if text:
             sections.append(text)
@@ -161,7 +194,7 @@ class PDFExtractor:
         # Footer (full-width)
         if regions.y_footer_top < page.height:
             text = self._crop_extract(
-                page, 0, regions.y_footer_top, page.width, page.height
+                page, 0, regions.y_footer_top, page.width, page.height, x_tolerance
             )
             if text:
                 sections.append(text)
@@ -353,6 +386,7 @@ class PDFExtractor:
         top: float,
         x1: float,
         bottom: float,
+        x_tolerance: float = 3,
     ) -> str:
         """
         Safely crop a page region and extract text.
@@ -370,7 +404,7 @@ class PDFExtractor:
 
         try:
             cropped = page.crop((x0, top, x1, bottom), strict=False)
-            return (cropped.extract_text() or "").strip()
+            return (cropped.extract_text(x_tolerance=x_tolerance) or "").strip()
         except Exception as exc:  # pragma: no cover
             logger.warning(f"  Crop failed ({x0:.0f},{top:.0f},{x1:.0f},{bottom:.0f}): {exc}")
             return ""

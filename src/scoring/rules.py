@@ -91,6 +91,7 @@ def score_pair(resume: ResumeInput, job: JobInput, preferences: SalaryPreference
     def put(key, score, supported, basis, rule_id):
         dimensions[key] = _result(score, supported, basis, rule_id, resume, job, key)
 
+    skills_breakdown = None
     cv_skills = skill_set(resume.document.get_flat_skills())
     required = skill_set([s.name for s in job.document.skills.required])
     preferred = skill_set([s.name for s in job.document.skills.preferred])
@@ -103,6 +104,16 @@ def score_pair(resume: ResumeInput, job: JobInput, preferences: SalaryPreference
         "preferred_only_coverage" if known_skills else "missing_skill_evidence", "R1")
     preferred_coverage = (round(100 * len(cv_skills & preferred) / len(preferred), 2)
                           if preferred and resume.facts.has("skills") and job.facts.has("skills") else None)
+    if config.version in {"ats-en-v2", "ats-en-v3"}:
+        from .skills_v2 import score_skills_v2
+        from .skills_v3 import score_skills_v3
+        scorer = score_skills_v3 if config.version == "ats-en-v3" else score_skills_v2
+        skills_breakdown = scorer(resume, job, config)
+        matched = skills_breakdown["matched_skills"]
+        missing = skills_breakdown["missing_skills"]
+        preferred_coverage = skills_breakdown["preferred_skill_coverage"]
+        put("skills", skills_breakdown["score"], skills_breakdown["supported"],
+            skills_breakdown["basis"], "R1-v3" if config.version == "ats-en-v3" else "R1-v2")
 
     candidate_title = _latest_title(resume, as_of_date)
     cv_role, cv_family = role(candidate_title)
@@ -171,8 +182,8 @@ def score_pair(resume: ResumeInput, job: JobInput, preferences: SalaryPreference
     scores = ATSDimensionalScores(**{key: value.score for key, value in dimensions.items()})
     total = scores.compute_overall()
     return ScoreResult(scores=scores, overall_score=total,
-                       grade=runtime_grade(total, scores.skills, scores.title, config),
+                       grade=runtime_grade(total, scores.skills, scores.title, config, skills_breakdown),
                        coverage=supported_coverage(dimensions), dimensions=dimensions,
                        matched_skills=matched, missing_skills=missing,
                        preferred_skill_coverage=preferred_coverage, config=config,
-                       as_of_date=as_of_date.isoformat())
+                       as_of_date=as_of_date.isoformat(), skills_breakdown=skills_breakdown)

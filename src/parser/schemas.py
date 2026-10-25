@@ -5,8 +5,10 @@ Adheres to JSON Resume standard (jsonresume.org) with streamlined fields for RAG
 Robust against null/empty LLM-generated values.
 """
 
-from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import List, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .skill_v2 import CVSkillDetail
 
 
 class BaseSchemaModel(BaseModel):
@@ -98,6 +100,7 @@ class Skill(BaseSchemaModel):
     name: str = Field(default="General", description="Skill group or domain name, e.g. Backend Development, Machine Learning, Cloud")
     level: Optional[str] = Field(default=None, description="Proficiency level: Beginner, Intermediate, Advanced, Master")
     keywords: List[str] = Field(default_factory=list, description="Specific tech keywords / tools, e.g. ['Python', 'FastAPI', 'Docker']")
+    details: List[CVSkillDetail] = Field(default_factory=list, description="V2 per-skill evidence; group level does not set proficiency")
 
     @field_validator("name", mode="before")
     @classmethod
@@ -160,6 +163,7 @@ class ResumeSchema(BaseSchemaModel):
     Provides utility methods to produce optimized text for BGE-M3 embeddings
     and metadata payloads for Qdrant vector database.
     """
+    schema_version: Literal["resume-v1", "resume-v2", "resume-v3"] = "resume-v1"
     basics: Basics = Field(default_factory=Basics)
     work: List[WorkExperience] = Field(default_factory=list, description="Work and employment history")
     education: List[Education] = Field(default_factory=list, description="Educational background")
@@ -168,6 +172,15 @@ class ResumeSchema(BaseSchemaModel):
     certificates: List[Certificate] = Field(default_factory=list, description="Certificates and competitive awards")
     languages: List[Language] = Field(default_factory=list, description="Spoken / written languages")
     summary_text: Optional[str] = Field(default=None, description="Pre-computed text summary for dense embedding")
+
+    @model_validator(mode="after")
+    def v2_skill_consistency(self):
+        if self.schema_version == "resume-v2":
+            key = lambda value: " ".join(value.casefold().split())
+            for group in self.skills:
+                if {key(v) for v in group.keywords} != {key(v.name) for v in group.details}:
+                    raise ValueError("V2 skill keywords must match per-skill details")
+        return self
 
     @field_validator("work", "education", "skills", "projects", "certificates", "languages", mode="before")
     @classmethod
