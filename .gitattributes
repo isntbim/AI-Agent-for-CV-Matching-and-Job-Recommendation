@@ -1,0 +1,3 @@
+# Keep ignore files LF: Miru splits them on LF, and CRLF breaks its ignore rules.
+.gitignore text eol=lf
+.miruignore text eol=lf

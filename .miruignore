@@ -1,0 +1,108 @@
+﻿# Python environments, bytecode, and tool caches
+.venv/
+.venv*/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.tox/
+.nox/
+.cache/
+.ipynb_checkpoints/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Generated reports and runtime output (including output/ats/)
+/output/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+logs/
+*.log
+
+# Model checkpoints, downloaded weights, and experiment artifacts
+/models/**
+!/models/**/
+!/models/**/README*
+!/models/**/.gitkeep
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.gguf
+*.h5
+*.hdf5
+mlruns/
+mlartifacts/
+wandb/
+ray_results/
+
+# Large datasets, serialized arrays, and local vector indexes
+# Keep JSON/JSONL/CSV fixtures and metadata searchable.
+*.parquet
+*.arrow
+*.feather
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.joblib
+*.faiss
+*.index
+
+# Local databases and their sidecar files
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
+
+# Version-control metadata, local agent state, and credentials
+.git/
+.serena/
+.codex-finalizer/
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.aws/
+*.pem
+*.key
+
+# Dependency lockfiles
+uv.lock
+poetry.lock
+Pipfile.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lock
+bun.lockb
+
+# Optional frontend dependencies and generated assets
+node_modules/
+.next/
+.nuxt/
+.output/
+.turbo/
+
+# OS metadata and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

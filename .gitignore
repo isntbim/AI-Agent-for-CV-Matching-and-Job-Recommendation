@@ -131,3 +131,9 @@ crawlers/
 data/raw/external/*
 !data/raw/external/.gitkeep
 !data/raw/external/README.md
+
+# Local-only: Qwen SFT exports hold full CV texts (personal data); scratch work; graphify snapshots/cache
+data/datasets/qwen_training/
+data/datasets/qwen_training_v4/
+/scratch/
+/graphify-out/
