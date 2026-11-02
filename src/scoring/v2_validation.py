@@ -8,8 +8,9 @@ import re
 
 from .normalization import SKILL_ALIASES, normalize, skill_name
 
-MANDATORY = re.compile(r"\b(?:must|mandatory|essential|required|need(?:s)? to)\b|bắt buộc|phải", re.I)
-OPTIONAL = re.compile(r"\b(?:preferred|optional|nice.to.have|(?:strong )?plus|advantage|desirable)\b|ưu tiên", re.I)
+# \s+ in Vietnamese phrases: CareerViet text carries non-breaking spaces ("ưu\xa0tiên")
+MANDATORY = re.compile(r"\b(?:must|mandatory|essential|required|need(?:s)? to)\b|bắt\s+buộc|phải", re.I)
+OPTIONAL = re.compile(r"\b(?:preferred|optional|nice.to.have|(?:strong )?plus|advantage|desirable)\b|ưu\s+tiên", re.I)
 NEGATIVE = re.compile(r"\b(?:no experience (?:in|with)|do not (?:know|use)|without (?:knowledge|experience)|not (?:familiar|proficient))\b", re.I)
 
 

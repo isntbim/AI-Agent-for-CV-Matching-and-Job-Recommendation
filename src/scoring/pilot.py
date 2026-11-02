@@ -74,9 +74,9 @@ def original_job_rows(root):
     return found
 
 
-def job_source(record, root, originals):
+def job_source(record, root, originals, exported_dir="data/raw/jobs"):
     id = record["id"]
-    exported = root / "data/raw/jobs" / (id + ".txt")
+    exported = root / exported_dir / (id + ".txt")
     if not exported.is_file():
         raise ValueError(f"Missing raw JD export: {id}")
     match = re.search(r"\.([a-z0-9]+)\.html", record["url"], re.I)
