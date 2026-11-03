@@ -97,6 +97,8 @@ class ScorerConfig(StrictModel):
     relations: list[SkillRelation] = Field(default_factory=list)
     relation_version: str = "empty-v1"
     allow_provisional_relations: bool = False
+    # automatic = unreviewed model extractions: review-level skill warnings are reported, not a neutral fallback
+    review_policy: Literal["strict", "automatic"] = "strict"
     lower_threshold: int = Field(default=50, ge=0, le=100)
     upper_threshold: int = Field(default=75, ge=0, le=100)
     neutral: int = Field(default=50, ge=0, le=100)
@@ -123,6 +125,8 @@ class ScorerConfig(StrictModel):
         result = handler(self)
         if self.version != RULE_VERSION_V3:
             result.pop("preferred_policy", None)
+        if self.review_policy == "strict":  # historical configs serialise byte-for-byte as before
+            result.pop("review_policy", None)
         return result
 
 

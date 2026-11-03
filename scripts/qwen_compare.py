@@ -16,7 +16,7 @@ from scripts.qwen_eval import DATA, parse, skills
 
 QWEN = Path(__file__).resolve().parent.parent / "output/review2/qwen"
 MODELS = (("raw Qwen", "base_rp_test"), ("V2", "v2_rp_test"), ("V3a", "v3_rp_test"), ("V3b", "v3b_rp_test"), ("V4", "v4_rp_test"),
-          ("V4 + repair/retry", "v4_final_test"))
+          ("V4 + repair/retry", "v4_final_test"), ("V4 local Q4 + repair/retry", "v4_local_final_test"))
 LOGS = (("V2", "log_history.json"), ("V3a", "v3a/log_history.json"), ("V3b", "v3b/log_history.json"), ("V4", "v4/log_history.json"))
 
 

@@ -321,3 +321,22 @@ def test_existing_score_cli_supports_source_validation_and_v3(tmp_path, ruleset,
     assert result["config"]["version"] == "ats-en-" + ruleset
     if policy:
         assert result["config"]["depth_policy"] == policy and result["skills_breakdown"]["core_gate_fulfillment"] == 1
+
+
+def test_automatic_review_policy_scores_through_review_warnings():
+    cv, jd = pair("normal", "normal", "standard")
+    cv.document.skills[0].details[0].raw_proficiency = "Proficient"  # unmapped wording: a review-level warning
+    cv.annotation.skills_status = "partial"
+    strict = score_skills_v3(cv, jd, config())
+    auto = score_skills_v3(cv, jd, config(review_policy="automatic"))
+    assert strict["basis"] == "missing_evidence" and strict["score"] == 50 and not strict["supported"]
+    assert auto["supported"] and auto["score"] == 100 and auto["matched_skills"] == ["python"]
+    assert auto["warnings"] == strict["warnings"] and auto["warnings"]  # still reported
+    assert auto["identity"]["review_policy"] == "automatic"
+
+
+def test_automatic_review_policy_still_blocks_rejected_requirements():
+    cv, jd = pair("normal", "normal", "standard")
+    jd.document.skills.requirements[0].review_status = "rejected"
+    result = score_skills_v3(cv, jd, config(review_policy="automatic"))
+    assert result["basis"] == "missing_evidence" and not result["supported"]

@@ -89,6 +89,7 @@ def _identity(resume: Any, job: Any, config: Any) -> dict[str, Any]:
         "preferred_policy_version": PREFERRED_POLICY_VERSION,
         "relation_version": _get(config, "relation_version", "empty-v1"),
         "code_sha256": _code_digest(),
+        **({"review_policy": "automatic"} if _get(config, "review_policy", "strict") == "automatic" else {}),
         "config_sha256": _digest(config),
         "annotation_sha256": _digest(annotations),
         "relations_sha256": _digest(relations),
@@ -122,6 +123,10 @@ class _Requirement:
     issues: tuple[str, ...]
     source_ids: tuple[str, ...]
     option_details: tuple[dict, ...] = ()
+
+
+# Warnings that block scoring even under review_policy="automatic": rejected annotations and evidence not linked to its skill.
+HARD_WARNINGS = ("is rejected", "rejected and must be corrected", "lacks a quote linked", "lacks evidence linked")
 
 
 def _prepare_candidates(resume: Any) -> tuple[list[_Candidate], list[str], list[dict[str, Any]]]:
@@ -506,7 +511,10 @@ def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
         return result
     if not requirements:
         return result
-    if warnings:
+    # automatic: no human reviewer exists, so review-level warnings are reported but the skills are scored as extracted
+    # (error-level evidence problems already fail extraction: ExtractionCache validates strictly).
+    hard = any(any(marker in w for marker in HARD_WARNINGS) for w in warnings)
+    if warnings and (hard or _get(config, "review_policy", "strict") == "strict"):
         result["requirements"] = [{"id": item.id, "requirement_id": item.id,
             "source_ids": list(item.source_ids), "options": list(item.options), "importance": item.importance,
             "weight": GROUP_WEIGHTS[item.importance], "candidate_skill": None, "selected_option": None,
