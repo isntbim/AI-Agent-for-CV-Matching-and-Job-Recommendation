@@ -27,3 +27,14 @@ def test_replay_returns_pod_rows_and_flags_missing_penalties(tmp_path):
     assert replay.complete("s", "u", 1.05) == ("{}", "length")
     with pytest.raises(MissingGeneration):
         replay.complete("s", "u", 1.1)
+
+
+def test_paired_difference_has_the_right_sign():
+    import numpy as np
+    from scripts.match_ir_eval import paired
+    rng = np.random.default_rng(0)
+    cv = np.repeat(np.arange(30), 20).astype(str)
+    label = rng.integers(0, 3, len(cv))
+    good, noise = label + rng.random(len(cv)) * 0.5, rng.random(len(cv))
+    out = paired(cv, label, good, noise, reps=200)
+    assert out["NDCG@10"]["diff"] > 0 and out["NDCG@10"]["ci95"][0] > 0 and out["NDCG@10"]["p"] < 0.05

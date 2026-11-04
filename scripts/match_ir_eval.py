@@ -83,6 +83,51 @@ def ndcg10_ci(cv, label, score, reps=300):
     return np.percentile([rng.choice(per, len(per)).mean() for _ in range(reps)], [2.5, 97.5]).round(4).tolist()
 
 
+def per_cv(cv, label, score, seeds=SEEDS) -> dict:
+    """{cv: (NDCG@10, MRR, P@5)} averaged over the same seeded tie-breaks as per_cv_metrics."""
+    out, rng = {}, np.random.default_rng(0)
+    jitters = [rng.random(len(score)) for _ in range(seeds)]
+    for c in np.unique(cv):
+        idx = np.flatnonzero(cv == c)
+        if not (label[idx] >= 1).any():
+            continue
+        vals = []
+        for jitter in jitters:
+            ranked = label[idx[np.lexsort((jitter[idx], -score[idx]))]]
+            gains, disc = 2.0 ** ranked - 1, 1 / np.log2(np.arange(2, len(ranked) + 2))
+            ideal = np.sort(2.0 ** label[idx] - 1)[::-1]
+            hits = ranked >= 1
+            vals.append(((gains[:10] * disc[:10]).sum() / (ideal[:10] * disc[:10]).sum(), 1 / (np.argmax(hits) + 1),
+                         hits[:5].mean()))
+        out[c] = np.mean(vals, axis=0)
+    return out
+
+
+def paired(cv, label, a, b, reps=2000) -> dict:
+    """a minus b on the same test CVs: mean difference, CV-bootstrap 95% CI, two-sided sign-flip permutation p."""
+    pa, pb = per_cv(cv, label, a), per_cv(cv, label, b)
+    diff = np.array([pa[c] - pb[c] for c in pa])  # CVs x (NDCG@10, MRR, P@5)
+    rng = np.random.default_rng(7)
+    boot = np.array([diff[rng.integers(0, len(diff), len(diff))].mean(0) for _ in range(reps)])
+    flips = np.array([(diff * rng.choice((-1, 1), (len(diff), 1))).mean(0) for _ in range(reps)])
+    obs = diff.mean(0)
+    p = ((np.abs(flips) >= np.abs(obs)).sum(0) + 1) / (reps + 1)
+    ids = np.unique(cv)
+    index = {c: np.flatnonzero(cv == c) for c in ids}
+    auc_diff = []
+    for _ in range(reps // 4):  # AUC Good vs No difference, bootstrap over CVs
+        take = np.concatenate([index[c] for c in rng.choice(ids, len(ids))])
+        y, keep = label[take], label[take] != 1
+        auc_diff.append(roc_auc_score(y[keep] == 2, a[take][keep]) - roc_auc_score(y[keep] == 2, b[take][keep]))
+    keep = label != 1
+    out = {m: {"diff": round(float(obs[i]), 4), "ci95": np.percentile(boot[:, i], [2.5, 97.5]).round(4).tolist(),
+               "p": round(float(p[i]), 4)} for i, m in enumerate(("NDCG@10", "MRR", "P@5"))}
+    out["AUC_good_vs_no"] = {"diff": round(float(roc_auc_score(label[keep] == 2, a[keep]) - roc_auc_score(label[keep] == 2, b[keep])), 4),
+                             "ci95": np.percentile(auc_diff, [2.5, 97.5]).round(4).tolist()}
+    out["cvs"] = len(diff)
+    return out
+
+
 def main() -> None:
     pairs = m.load_pairs()
     texts = {}
@@ -116,6 +161,17 @@ def main() -> None:
     Xb, _, _, _ = load_dims("all_relations_fn", "test", ["text_cos", "title_cos"])
     lr = LogisticRegression(max_iter=5000).fit(Xa, ya >= 1)
     scores["Hybrid (V3.1 + BGE-M3 text/title)"] = np.concatenate([lr.decision_function(Xa), lr.decision_function(Xb)])
+    rerank_file = LAB / "reranker_scores.jsonl"  # scripts/reranker_baseline.py
+    if rerank_file.exists():
+        ce = {(r["cv"], r["jd"]): r["score"] for r in map(json.loads, rerank_file.open(encoding="utf-8"))}
+        scores["Cross-encoder (BGE reranker)"] = np.array([ce[k] for k in key])
+    extras = {"TF-IDF": scores["TF-IDF + cosine"]} | (
+        {"cross-encoder": scores["Cross-encoder (BGE reranker)"]} if "Cross-encoder (BGE reranker)" in scores else {})
+    for names in [["TF-IDF"], ["cross-encoder"], ["TF-IDF", "cross-encoder"]]:
+        if all(n in extras for n in names):  # same protocol: fitted on dev only, test scored once
+            col = np.column_stack([extras[n] for n in names])
+            fit = LogisticRegression(max_iter=5000).fit(np.hstack([Xa, col[is_dev]]), ya >= 1)
+            scores[f"Hybrid + {' + '.join(names)}"] = fit.decision_function(np.hstack([np.vstack([Xa, Xb]), col]))
 
     report, test = {}, ~is_dev
     for name, s in scores.items():
@@ -123,14 +179,29 @@ def main() -> None:
         report[name] = {**{k: round(float(v), 4) for k, v in pair_metrics(label[test], s[test], cuts).items()},
                         **per_cv_metrics(cv[test], label[test], s[test]),
                         "ndcg@10_ci": ndcg10_ci(cv[test], label[test], s[test])}
+    hybrid, v31 = "Hybrid (V3.1 + BGE-M3 text/title)", "V3.1 rule scorer"
+    comparisons = [(hybrid, "TF-IDF + cosine"), (hybrid, "SBERT (MiniLM)"), (hybrid, "BGE-M3 cosine"), (hybrid, v31),
+                   (v31, "TF-IDF + cosine"), (v31, "V3 rule scorer")]
+    for best in ("Hybrid + cross-encoder", "Hybrid + TF-IDF + cross-encoder", "Hybrid + TF-IDF"):
+        if best in scores:
+            comparisons += [(best, hybrid), (best, "TF-IDF + cosine")]
+    if "Cross-encoder (BGE reranker)" in scores:
+        comparisons += [("Cross-encoder (BGE reranker)", "TF-IDF + cosine"), (hybrid, "Cross-encoder (BGE reranker)")]
+    significance = {f"{a} vs {b}": paired(cv[test], label[test], scores[a][test], scores[b][test]) for a, b in comparisons}
     majority = float((label[test] == 0).mean())
     meta = {"test_pairs": int(test.sum()), "test_cvs": int(len(set(cv[test]))), "always_no_fit_accuracy": round(majority, 4),
             "relevant": "Potential or Good Fit", "tie_break_seeds": SEEDS}
-    (LAB / "benchmark.json").write_text(json.dumps({"meta": meta, "results": report}, indent=1), encoding="utf-8")
+    (LAB / "benchmark.json").write_text(json.dumps({"meta": meta, "results": report, "paired": significance}, indent=1),
+                                        encoding="utf-8")
     cols = ["auc_good_vs_no", "auc_fit_vs_no", "macro_f1", "balanced_accuracy", "accuracy", "P@5", "R@10", "Hit@5", "MRR", "NDCG@5", "NDCG@10"]
     lines = [f"Test half: {meta['test_pairs']} pairs, {meta['test_cvs']} CVs; always-No-Fit accuracy {majority:.3f}.", "",
              "| Method | " + " | ".join(cols) + " | NDCG@10 95% CI |", "|---" * (len(cols) + 2) + "|"]
     lines += [f"| {n} | " + " | ".join(f"{r[c]:.3f}" for c in cols) + f" | {r['ndcg@10_ci']} |" for n, r in report.items()]
+    lines += ["", "Paired on the same test CVs (A minus B): mean difference [95% CV-bootstrap CI], sign-flip permutation p.",
+              "", "| A vs B | NDCG@10 | MRR | P@5 | AUC Good vs No |", "|---|---|---|---|---|"]
+    cell = lambda d: f"{d['diff']:+.3f} [{d['ci95'][0]:+.3f}, {d['ci95'][1]:+.3f}]" + (f", p={d['p']:.4f}" if "p" in d else "")
+    lines += [f"| {k} | " + " | ".join(cell(v[m]) for m in ("NDCG@10", "MRR", "P@5", "AUC_good_vs_no")) + " |"
+              for k, v in significance.items()]
     (LAB / "benchmark.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 
