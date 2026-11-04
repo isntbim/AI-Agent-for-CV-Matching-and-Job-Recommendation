@@ -14,6 +14,13 @@ PENALTIES = (1.05, 1.1, 1.15, 1.2)  # first try = the evaluated setting; retries
 MAX_NEW_TOKENS = 16384  # same cap as generate.py; longest training answer is ~12k tokens
 
 
+def token_cap(source_tokens: int) -> int:
+    """Stop a looping generation early so the graph retries sooner. Fitted on the 765-document A100 run
+    (output/match_eval/pod): of 1,179 generations, every one that stopped on its own fit under 3 x source + 4000 except
+    one JD that failed validation and was retried anyway; the cap would have cut 24% of all generated tokens, all loops."""
+    return min(MAX_NEW_TOKENS, 3 * source_tokens + 4000)
+
+
 class State(TypedDict, total=False):
     system: str
     user: str
@@ -43,9 +50,10 @@ class QwenV4:
 
         prompt = self.tok.apply_chat_template([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                               tokenize=False, add_generation_prompt=True)
+        cap = token_cap(len(self.tok(json.loads(user)["source_text"])["input_ids"]))
         r = httpx.post(f"{self.url}/api/generate", timeout=self.timeout, json={
             "model": self.model, "prompt": prompt, "raw": True, "stream": False,
-            "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": MAX_NEW_TOKENS,
+            "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": cap,
                         "repeat_penalty": repetition_penalty, "repeat_last_n": 32768}})
         r.raise_for_status()
         out = r.json()
@@ -68,6 +76,8 @@ def build_graph(llm):
         if label is None:
             return {"label": None, "status": "unparsed", "log": s["log"] + [f"{tag}: unparsed"]}
         label, status, log = repair(label, s["text"], s["task"])
+        if s["finish"] == "length":  # a cut-off answer may parse yet miss evidence: never accept it (0 of 700 were)
+            status = "truncated"
         return {"label": label, "status": status, "log": s["log"] + [f"{tag}: {status}"] + log}
 
     def route(s: State) -> str:
@@ -94,12 +104,14 @@ class V4Client:
         if self.graph is None:
             self.llm = self.llm or QwenV4()
             self.graph = build_graph(self.llm)
+        self.last_metadata = self.last_response = None  # an exception mid-graph must not leave the previous doc's log
         user = json.loads(user_prompt)
         task = "cv_extraction" if user["document_kind"] == "resume" else "jd_extraction"
         s = self.graph.invoke({"system": system_prompt, "user": user_prompt, "text": user["source_text"], "task": task,
                                "attempt": 0, "log": []})
         self.last_metadata = {"model": "qwen2.5-7b-v4-qlora", "attempts": s["attempt"] + 1,
                               "repetition_penalty": PENALTIES[s["attempt"]], "status": s["status"], "log": s["log"]}
+        self.last_response = json.dumps(s["label"], ensure_ascii=False) if s["label"] is not None else s["raw"]
         if s["status"] not in ("pass", "partial"):
             raise ExtractionError(f"V4 output still invalid after {s['attempt'] + 1} attempts: {s['status']}")
-        return json.dumps(s["label"], ensure_ascii=False)
+        return self.last_response
