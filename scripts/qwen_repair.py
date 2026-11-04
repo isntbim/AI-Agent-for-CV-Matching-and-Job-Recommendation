@@ -12,16 +12,21 @@ lowest penalty that repairs to a valid label replaces the first answer (the gold
 import argparse
 import copy
 import json
+import math
 import re
+import unicodedata
 import sys
 from pathlib import Path
 
-from scripts.cv_teacher_validate import undefined_keys, word_in
+from scripts.cv_teacher_validate import DATE_FIELDS, real_date, undefined_keys, word_in
 from scripts.jd_teacher_check import JD_SCHEMA, PREFERRED
-from scripts.qwen_eval import DATA, parse, validate
+from scripts.qwen_eval import DATA, FENCE, parse, validate
 from src.scoring.normalization import ROLE_FAMILIES
+from src.scraper.import_careerviet import detect_language
 from src.scoring.v3_aliases import name_in_quote
 
+MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+DEGREES = ("high_school", "associate", "bachelor", "master", "doctorate")  # Facts.completed_degrees enum
 MAX_ROUNDS = 8
 ISSUE = re.compile(r"((?:skills|requirements)\.[^:;]+):(\w+)")
 
@@ -65,8 +70,67 @@ def parse_balanced(raw: str, schema: dict | None = None) -> dict | None:
     found = [d for j, ch in enumerate(raw) if ch in "}]" and (d := parse(raw[:j] + raw[j + 1:])) is not None]
     if (d := parse(balance(raw))) is not None:
         found.append(d)
+    if not found and (d := mend(raw)) is not None:
+        found.append(d)
     fits = lambda d: len(undefined_keys(d, schema) if schema else undefined_keys(d)) if isinstance(d.get("document"), dict) else 10**6
     return min(found, key=fits) if found else None
+
+
+ARITHMETIC = re.compile(r'(?<=":)\s*\(?\s*\d[\d.]*\s*[*/]\s*[\d.()*/+ -]+(?=\s*[,}])')  # "min_monthly":70*8
+
+
+def in_string(s: str, index: int) -> bool:
+    inside, esc = False, False
+    for ch in s[:index]:
+        if inside:
+            inside = not (ch == '"' and not esc)
+            esc = ch == "\\" and not esc
+        elif ch == '"':
+            inside, esc = True, False
+    return inside
+
+
+def mend(raw: str, max_edits: int = 8) -> dict | None:
+    """Last resort for a syntax slip, at each JSON error: '"name[".NET"' -> '"name":".NET"', ',"{"quote"' -> ',{"quote"',
+    a stray ')', '(' or '>' dropped, a missing ']' or '}' added. Only punctuation is edited, never letters or digits;
+    the edit that lets the parser get furthest is kept. A computed number ("70*8") becomes null, never a guess."""
+    s = FENCE.sub("", raw)
+    for m in reversed(list(ARITHMETIC.finditer(s))):
+        if not in_string(s, m.start()):  # a value token, not text inside a quote
+            s = s[:m.start()] + "null" + s[m.end():]
+    for _ in range(max_edits + 1):
+        try:
+            data = json.loads(s)
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError as e:
+            pos = e.pos
+        cands = []
+        if s[pos - 2:pos] == '["':
+            cands.append(s[:pos - 2] + '":"' + s[pos:])
+        if s[pos - 3:pos] == '"{"':
+            cands.append(s[:pos - 3] + s[pos - 2:])
+        if s[pos:pos + 1] in (")", "(", ">"):
+            if not (s[pos - 1:pos].isalnum() and s[pos + 1:pos + 2].isalnum()):
+                cands.append(s[:pos] + s[pos + 1:])
+        if s[pos - 1:pos] in (")", "(", ">"):
+            if not (s[pos - 2:pos - 1].isalnum() and s[pos:pos + 1].isalnum()):
+                cands.append(s[:pos - 1] + s[pos:])
+        if s[pos:pos + 1] == ":" and (k := s.rfind(',"', 0, pos)) > 0:  # a key landed inside an unclosed list
+            cands += [s[:k] + closer + s[k:] for closer in ("]", "}")]
+        cands += [s[:pos] + "]" + s[pos:], s[:pos] + "}" + s[pos:]]
+        best, reach = None, pos
+        for cand in cands:
+            try:
+                json.loads(cand)
+                best, reach = cand, len(cand) + 1
+                break
+            except json.JSONDecodeError as e:
+                if e.pos > reach:
+                    best, reach = cand, e.pos
+        if best is None:
+            return None
+        s = best
+    return None
 
 
 def source_line(name: str, text: str) -> str | None:
@@ -96,8 +160,9 @@ def drop_undefined(label: dict, schema: dict | None) -> list[str]:
 def fix_evidence(facts: dict, text: str, log: list[str]) -> None:
     for dim, quotes in list((facts.get("evidence") or {}).items()):
         kept = []
-        for q in quotes or []:
-            s = snap((q or {}).get("quote"), text)
+        for q in quotes if isinstance(quotes, list) else []:
+            q = {"quote": q} if isinstance(q, str) else q if isinstance(q, dict) else {}  # a bare quote string
+            s = snap(q.get("quote"), text)
             if s:
                 kept.append({**q, "quote": s})
             else:
@@ -142,8 +207,33 @@ def unclaim(facts: dict, doc: dict, task: str, log: list[str]) -> None:
                     log.append(f"cleared seniority.{k}: no experience evidence")
 
 
+def salvage_date(value: str) -> str | None:
+    """'2017-May' -> '2017-05', '2016-Fall' / 'Expected in 2012' -> the year, no year -> None."""
+    year = re.search(r"(?<!\d)(19|20)\d{2}(?!\d)", value)
+    if not year:
+        return None
+    numeric = (re.search(r"(?<!\d)(?:19|20)\d{2}[-/.](0?[1-9]|1[0-2])(?!\d)", value)
+               or re.search(r"(?<!\d)(0?[1-9]|1[0-2])[-/.](?:19|20)\d{2}(?!\d)", value))
+    if numeric:
+        return f"{year.group(0)}-{int(numeric.group(1)):02d}"
+    month = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?![a-z])", value, re.I)
+    return f"{year.group(0)}-{MONTHS.index(month.group(1).lower()) + 1:02d}" if month else year.group(0)
+
+
 def fix_cv(label: dict, text: str, log: list[str]) -> None:
-    doc = label["document"]
+    doc, facts = label["document"], label["facts"]
+    for section, fields in DATE_FIELDS.items():
+        for record in doc.get(section) or []:
+            for key in fields:
+                value = record.get(key)
+                ongoing = value == "Present" and key == "endDate" and section in ("work", "projects")
+                if isinstance(value, str) and not ongoing and not real_date(value):
+                    record[key] = salvage_date(value)
+                    log.append(f"{section}.{key} {value!r} -> {record[key]!r}")
+    bad = [d for d in facts.get("completed_degrees") or [] if d not in DEGREES]
+    if bad:  # a degree outside the scale ("professional_diploma", "postgraduate") is not claimed rather than guessed
+        facts["completed_degrees"] = [d for d in facts["completed_degrees"] if d in DEGREES]
+        log.append(f"dropped completed_degrees outside the scale: {bad}")
     for group in doc.get("skills") or []:
         kept = []
         for d in group.get("details") or []:
@@ -214,7 +304,10 @@ def fix_jd(label: dict, text: str, log: list[str]) -> None:
         if r.get("importance") == "preferred" and not (iq and PREFERRED.search(iq)):
             r["importance"] = "standard"
             log.append(f"{r['id']}: preferred without optional wording -> standard")
-        r["importance_quote"] = iq if iq and all(name_in_quote(o, iq) for o in opts) else q
+        keep = iq if iq and all(name_in_quote(o, iq) for o in opts) else q
+        if r["importance"] == "preferred" and not PREFERRED.search(unicodedata.normalize("NFC", keep)):
+            keep = iq  # the optional wording sits in a heading ("Preferred Qualifications") that names no option
+        r["importance_quote"] = keep
         for d in r["option_details"]:
             raw, pq = d.get("raw_proficiency"), snap(d.get("proficiency_quote"), text)
             if raw and not (pq and raw.casefold() in pq.casefold() and name_in_quote(d.get("name") or "", pq)):
@@ -235,6 +328,29 @@ def fix_jd(label: dict, text: str, log: list[str]) -> None:
     if reqs and not ev.get("skills"):
         ev["skills"] = [{"quote": q} for q in dict.fromkeys(r["quote"] for r in reqs)]
         log.append("evidence.skills rebuilt from requirement quotes")
+    comp = doc.get("compensation") if isinstance(doc.get("compensation"), dict) else {}
+    salary = ("min_monthly", "max_monthly", "min_annual", "max_annual")
+    if any(comp.get(k) is not None for k in salary) and not facts.get("currency"):
+        # no currency = numbers without a unit; on US JDs they were also mis-scaled (annual/hourly read as monthly)
+        comp.update(dict.fromkeys(salary), currency=None)
+        log.append("cleared salary numbers: no currency stated (salary left unscored)")
+    if facts.get("currency") and comp.get("currency") != facts["currency"]:
+        if comp.get("currency") and any(comp.get(k) is not None for k in salary):
+            comp.update(dict.fromkeys(salary))  # amounts in another stated unit: abstain, never relabel them
+            log.append(f"cleared salary numbers: compensation in {comp['currency']!r}, facts.currency {facts['currency']!r}")
+        comp["currency"] = facts["currency"]
+        doc["compensation"] = comp
+        log.append(f"compensation.currency set to facts.currency {facts['currency']!r}")
+    meta = doc.setdefault("metadata", {})
+    if meta.get("language") not in ("en", "vi", "mixed"):
+        meta["language"] = detect_language(text)
+        log.append(f"metadata.language set to {meta['language']!r} from the source text")
+    seniority = doc.get("seniority") or {}
+    for key in ("min_years", "max_years"):
+        years = seniority.get(key)
+        if isinstance(years, float) and not years.is_integer():  # schema years are whole; "2.5 years" / "6 months"
+            seniority[key] = math.ceil(years)  # up: never lowers a stated minimum
+            log.append(f"seniority.{key} {years} -> {seniority[key]} (whole years)")
 
 
 def fix_issues(label: dict, error: str, task: str, log: list[str]) -> bool:

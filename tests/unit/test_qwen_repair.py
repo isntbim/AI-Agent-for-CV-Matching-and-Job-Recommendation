@@ -55,3 +55,79 @@ def test_balance_drops_only_stray_closers():
     assert json.loads(balance(slip)) == {"document": {"skills": {"requirements": [{"options": ["a"]}]}}, "facts": {}}
     early = '{"document":{"x":1}}},"facts":{}}'  # root closed too early
     assert json.loads(balance(early)) == {"document": {"x": 1}, "facts": {}}
+
+
+def test_fix_jd_clears_salary_numbers_without_a_currency():
+    quote = "Salary range: $60,000 - $90,000"
+    label = {"document": {"skills": {"requirements": []}, "compensation": {"currency": None, "min_monthly": 60000,
+             "max_monthly": 90000, "min_annual": None, "max_annual": None}},
+             "facts": {"currency": None, "evidence": {"salary": [{"quote": quote}]}}}
+    log = []
+    fix_jd(label, quote, log)
+    comp = label["document"]["compensation"]
+    assert all(comp[k] is None for k in ("min_monthly", "max_monthly", "min_annual", "max_annual"))
+    assert label["facts"]["evidence"]["salary"] == [{"quote": quote}] and any("cleared salary" in line for line in log)
+    label["facts"]["currency"] = "VND"  # with a currency the numbers are kept
+    label["document"]["compensation"].update(min_monthly=15, currency="VND")
+    fix_jd(label, quote, [])
+    assert label["document"]["compensation"]["min_monthly"] == 15
+
+
+def test_fix_jd_rounds_fractional_years_up():
+    label = {"document": {"skills": {"requirements": []}, "seniority": {"min_years": 2.5, "max_years": 4}},
+             "facts": {"evidence": {}}}
+    log = []
+    fix_jd(label, "", log)
+    assert label["document"]["seniority"] == {"min_years": 3, "max_years": 4} and any("2.5 -> 3" in line for line in log)
+
+
+def test_fix_cv_salvages_dates_and_drops_degrees_off_the_scale():
+    label = {"document": {"skills": [], "education": [{"startDate": "2016-Fall", "endDate": "2017-May"},
+                                                      {"startDate": "--", "endDate": "Present"}]},
+             "facts": {"completed_degrees": ["master", "professional_diploma"], "evidence": {}}}
+    fix_cv(label, "", [])
+    assert label["document"]["education"] == [{"startDate": "2016", "endDate": "2017-05"}, {"startDate": None, "endDate": None}]
+    assert label["facts"]["completed_degrees"] == ["master"]
+
+
+def test_fix_jd_keeps_preferred_wording_from_a_heading():
+    text = "Preferred Qualifications\nExperience with TypeScript"
+    label = {"document": {"skills": {"requirements": [{"id": "r", "options": ["TypeScript"], "importance": "preferred",
+             "quote": "Experience with TypeScript", "importance_quote": "Preferred Qualifications"}]}},
+             "facts": {"evidence": {}}}
+    fix_jd(label, text, [])
+    r = label["document"]["skills"]["requirements"][0]
+    assert r["importance"] == "preferred" and r["importance_quote"] == "Preferred Qualifications"
+
+
+def test_mend_fixes_syntax_slips_without_inventing_numbers():
+    from scripts.qwen_repair import parse_balanced
+    assert parse_balanced('{"document":{"skills":[{"name[".NET","p":1}]},"facts":{}}')["document"]["skills"][0]["name"] == ".NET"
+    assert parse_balanced('{"document":{"c":{"min_monthly":70*8,"max":1}},"facts":{}}')["document"]["c"]["min_monthly"] is None
+    assert parse_balanced('{"document":{"a":["x","y"]),"b":1},"facts":{}}')["document"]["b"] == 1  # stray ')'
+    assert parse_balanced('{"document":{"q":[{"quote":"a"},"{"quote":"b"}]},"facts":{}}')["document"]["q"][1] == {"quote": "b"}
+
+
+def test_mend_closes_a_list_before_a_key():
+    from scripts.qwen_repair import parse_balanced
+    out = parse_balanced('{"document":{},"facts":{"evidence":{"skills":[{"quote":"a"},"title":[{"quote":"b"}]}}}')
+    assert out["facts"]["evidence"] == {"skills": [{"quote": "a"}], "title": [{"quote": "b"}]}
+
+
+def test_codex_review4_regressions():
+    from scripts.qwen_repair import parse_balanced, salvage_date
+    assert salvage_date("2017 (summary)") == "2017" and salvage_date("May 2017") == "2017-05"
+    assert salvage_date("Sept 2017") == "2017-09" and salvage_date("2017/05") == "2017-05" and salvage_date("Sept") is None
+    assert parse_balanced('{"document":{"seniority":{"min_years":2>5}},"facts":{}}') is None  # never 25
+    kept = parse_balanced('{"document":{"summary":"rate \\"x\\":70*8, ok"},"facts":{"a":1)}}')
+    assert kept is None or kept["document"]["summary"] == 'rate "x":70*8, ok'  # text inside strings untouched
+    quote = "Monthly salary: 5000 USD, approximately 125000000 VND."
+    label = {"document": {"skills": {"requirements": []}, "compensation": {"currency": "USD", "max_monthly": 5000}},
+             "facts": {"currency": "VND", "evidence": {"salary": [{"quote": quote}]}}}
+    fix_jd(label, quote, [])
+    assert label["document"]["compensation"]["max_monthly"] is None  # abstain, never "5000 VND"
+    bare = {"document": {"skills": {"requirements": []}, "metadata": {"language": "en"}}, "facts": {"evidence": {}}}
+    fix_jd(bare, "", [])
+    assert "compensation" not in bare["document"]  # an untouched JD gains nothing
+
+

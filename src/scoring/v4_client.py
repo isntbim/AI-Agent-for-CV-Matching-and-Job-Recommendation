@@ -51,13 +51,85 @@ class QwenV4:
         prompt = self.tok.apply_chat_template([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                               tokenize=False, add_generation_prompt=True)
         cap = token_cap(len(self.tok(json.loads(user)["source_text"])["input_ids"]))
-        r = httpx.post(f"{self.url}/api/generate", timeout=self.timeout, json={
-            "model": self.model, "prompt": prompt, "raw": True, "stream": False,
-            "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": cap,
-                        "repeat_penalty": repetition_penalty, "repeat_last_n": 32768}})
-        r.raise_for_status()
-        out = r.json()
-        return out["response"], "length" if out.get("done_reason") == "length" else "stop"
+        text, used = "", 0
+        for _ in range(MAX_CUTS + 1):
+            cut, done, streamed = None, None, 0
+            with httpx.stream("POST", f"{self.url}/api/generate", timeout=self.timeout, json={
+                    "model": self.model, "prompt": prompt + text, "raw": True, "stream": True,
+                    "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": cap - used,
+                                "repeat_penalty": repetition_penalty, "repeat_last_n": 32768}}) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    chunk = json.loads(line)
+                    if "error" in chunk:  # a failed generation must never pass as output
+                        raise ExtractionError(f"Ollama error mid-generation: {chunk['error']}")
+                    if chunk.get("done"):
+                        text += chunk.get("response", "")
+                        done, streamed = chunk.get("done_reason") or "stop", chunk.get("eval_count", streamed)
+                        break
+                    text += chunk.get("response", "")
+                    streamed += 1  # one token per streamed message; the final eval_count overrides
+                    if streamed % 64 == 0 and (cut := loop_cut(text)) is not None:  # O(n) scan every 64 tokens
+                        break
+            used += streamed
+            if cut is None:
+                if done is None:
+                    raise ExtractionError("Ollama stream ended without a completion message")
+                return text, "length" if done == "length" else "stop"
+            text = cut  # the loop is removed and its list closed; generation resumes from there
+            if used >= cap:
+                return text, "length"
+        return text, "length"
+
+
+MAX_CUTS = 6  # loop removals per generation
+
+
+def loop_cut(text: str, run: int = 8) -> str | None:
+    """If the innermost open JSON list ends with `run` items that all already appeared earlier in that list (a
+    generation loop: "C#","C#",... or "JDBC","JSP","JDBC",...), return the text with that run removed and the list
+    closed; else None. Items are split at the list's own commas, so lists of objects work too."""
+    stack, in_str, esc = [], False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            in_str = not (ch == '"' and not esc)
+            esc = ch == "\\" and not esc
+        elif ch == '"':
+            in_str, esc = True, False
+        elif ch in "[{":
+            stack.append((ch, i))
+        elif ch in "]}" and stack:
+            stack.pop()
+    lists = [i for ch, i in stack if ch == "["]
+    if not lists:
+        return None
+    start = lists[-1]
+    depth, in_str, esc, bounds = 0, False, False, [start + 1]
+    for i in range(start + 1, len(text)):
+        ch = text[i]
+        if in_str:
+            in_str = not (ch == '"' and not esc)
+            esc = ch == "\\" and not esc
+        elif ch == '"':
+            in_str, esc = True, False
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            bounds.append(i + 1)
+    items = [text[a:b - 1].strip() for a, b in zip(bounds, bounds[1:])]  # complete items only
+    if len(items) <= run:
+        return None
+    partial = text[bounds[-1]:].strip()
+    if partial and not any(item.startswith(partial) for item in items):
+        return None  # the item being written is new: the model is leaving the loop, keep it
+    first = len(items)
+    while first > 0 and items[first - 1] in items[:first - 1]:
+        first -= 1
+    if len(items) - first < run:
+        return None
+    return text[:bounds[first] - 1].rstrip(",") + "]" if first else text[:start + 1] + "]"
 
 
 def build_graph(llm):

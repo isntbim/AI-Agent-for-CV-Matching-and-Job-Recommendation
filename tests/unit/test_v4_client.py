@@ -55,3 +55,45 @@ def test_a_cut_off_answer_is_never_accepted(monkeypatch):
     with pytest.raises(ExtractionError, match="truncated"):
         call(V4Client(llm))
     assert llm.penalties == list(v4_client.PENALTIES)
+
+
+def test_loop_cut_removes_a_repeating_run_and_closes_the_list():
+    head = '{"document":{"skills":[{"name":"Dev","keywords":["Java","JSP","JDBC"'
+    looped = head + ',"JSP","JDBC"' * 5 + ',"JS'
+    assert v4_client.loop_cut(looped) == head + "]"
+    objs = '{"facts":{"evidence":{"title":[{"quote":"Accountant"}' + ',{"quote":"Accountant"}' * 9 + ',{"quo'
+    assert v4_client.loop_cut(objs) == '{"facts":{"evidence":{"title":[{"quote":"Accountant"}]'
+    assert v4_client.loop_cut(head + ',"Go","Rust","C","C++","SQL","R","Bash","Perl","Lua",') is None  # no repeats
+
+
+def test_loop_cut_keeps_an_item_that_leaves_the_loop():
+    head = '{"facts":{"evidence":{"q":[' + ",".join(['{"quote":"A"}'] * 10)
+    assert v4_client.loop_cut(head + ',{"quote":"B') is None  # B is new: the model is escaping, keep it
+    assert v4_client.loop_cut(head + ',{"quote":"A') == '{"facts":{"evidence":{"q":[{"quote":"A"}]'
+
+
+class FakeStream:
+    def __init__(self, lines): self.lines = lines
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def raise_for_status(self): pass
+    def iter_lines(self): return iter(self.lines)
+
+
+def fake_v4(monkeypatch, lines):
+    import httpx
+    llm = v4_client.QwenV4.__new__(v4_client.QwenV4)
+    llm.model, llm.url, llm.timeout = "m", "u", 1
+    llm.tok = type("T", (), {"apply_chat_template": lambda self, *a, **k: "P", "__call__": lambda self, t: {"input_ids": [0] * 10}})()
+    monkeypatch.setattr(httpx, "stream", lambda *a, **k: FakeStream([json.dumps(x) for x in lines]))
+    return llm
+
+
+def test_stream_uses_eval_count_and_fails_on_errors(monkeypatch):
+    user = json.dumps({"source_text": "x"})
+    ok = [{"response": "{}"}] * 3 + [{"done": True, "done_reason": "stop", "eval_count": 3, "response": ""}]
+    assert fake_v4(monkeypatch, ok).complete("s", user, 1.05) == ("{}{}{}", "stop")
+    with pytest.raises(ExtractionError):
+        fake_v4(monkeypatch, [{"response": "{}"}, {"error": "backend failed"}]).complete("s", user, 1.05)
+    with pytest.raises(ExtractionError):
+        fake_v4(monkeypatch, [{"response": "{}"}]).complete("s", user, 1.05)  # no completion message
