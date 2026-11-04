@@ -9,7 +9,7 @@ from tests.unit.test_ats_scorer import inputs
 def test_v31_config_loads_the_committed_relations_as_approved():
     cfg = v31_config()
     assert len(cfg.relations) == 2127 and {r.review_status for r in cfg.relations} == {"approved"}
-    assert (cfg.title_policy, cfg.experience_policy, cfg.lower_threshold, cfg.upper_threshold) == ("contained", "lower_bound", 43, 60)
+    assert (cfg.title_policy, cfg.experience_policy, cfg.lower_threshold, cfg.upper_threshold) == ("contained", "lower_bound", 43, 58)
 
 
 def test_explanation_reads_only_the_score_result():

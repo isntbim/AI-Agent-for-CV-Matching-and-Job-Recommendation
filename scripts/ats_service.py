@@ -26,11 +26,12 @@ GRADES = ("No Fit", "Potential Fit", "Good Fit")
 
 
 def v31_config() -> ScorerConfig:
-    """V3.1 as evaluated (output/match_eval/lab, test half AUC 0.917). The near relations are auto-built and treated as
-    approved after a 60-item hand audit (~90% precise); grade cut-offs 43 / 60 were fitted on the dev half for macro-F1."""
+    """V3.1 as evaluated (output/match_eval/lab: test-half AUC 0.910, all 59,337 pairs). The near relations are
+    auto-built and treated as approved after a 60-item hand audit (~90% precise); grade cut-offs 43 / 58 (dev-fitted
+    43.4 / 57.8 for macro-F1)."""
     table = json.loads(RELATIONS.read_text(encoding="utf-8"))
     return ScorerConfig(version="ats-en-v3", review_policy="automatic", title_policy="contained",
-                        experience_policy="lower_bound", lower_threshold=43, upper_threshold=60,
+                        experience_policy="lower_bound", lower_threshold=43, upper_threshold=58,
                         relations=[r | {"review_status": "approved"} for r in table["relations"]],
                         relation_version=table["version"])
 
