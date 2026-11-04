@@ -3,6 +3,7 @@
 Baseline:   python generate.py --data data --split test --out preds/base_test.jsonl
 Fine-tuned: python generate.py --data data --split test --adapter runs/qlora_r16_e1/adapter --out preds/ft_test.jsonl
 Retry:      python generate.py ... --ids cv_007,jd_233 --repetition-penalty 1.1 1.2 1.3   (one row per id per penalty)
+Prompts:    python generate.py --prompts prompts.jsonl [--ids-file retry_ids.txt] ...   (scripts/match_eval.py --export-prompts)
 Score locally afterwards with scripts/qwen_eval.py.
 """
 
@@ -20,7 +21,9 @@ TASKS = ("cv_extraction", "jd_extraction")
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", type=Path, required=True)
+    p.add_argument("--data", type=Path)
+    p.add_argument("--prompts", type=Path, help="jsonl of {id, kind, system, user} instead of --data/--split")
+    p.add_argument("--ids-file", type=Path, help="newline-separated ids, like --ids")
     p.add_argument("--split", default="test", choices=("validation", "test"))
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
@@ -55,8 +58,16 @@ def main() -> None:
         if args.adapter_artifact:
             run.use_artifact(args.adapter_artifact)  # lineage: adapter -> these predictions
 
-    rows =[dict(json.loads(line), task=task) for task in TASKS
-            for line in (args.data / task / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines()]
+    if args.prompts:
+        rows = [{"id": r["id"], "task": r["kind"], "messages": [{"role": "system", "content": r["system"]},
+                                                              {"role": "user", "content": r["user"]}]}
+                for r in map(json.loads, args.prompts.read_text(encoding="utf-8").splitlines())]
+    else:
+        rows = [dict(json.loads(line), task=task) for task in TASKS
+                for line in (args.data / task / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines()]
+    if args.ids_file:
+        args.ids = ",".join(args.ids_file.read_text(encoding="utf-8").split())
+        assert args.ids, "empty --ids-file would regenerate every row"
     if args.ids:
         wanted = set(args.ids.split(","))
         rows = [r for r in rows if r["id"] in wanted]

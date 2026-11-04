@@ -296,6 +296,8 @@ def repair(label: dict, text: str, task: str) -> tuple[dict, str, list[str]]:
         else:
             fix_cv(label, text, log)
         status, error = validate(label, text, task)
+    if status == "fail":
+        log.append(f"unresolved: {str(error)[:500]}")  # why the validator still rejects it
     return label, status, log
 
 

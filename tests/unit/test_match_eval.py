@@ -14,3 +14,16 @@ def test_metrics_perfect_ranking():
     m = metrics(rows)
     assert m["auc_good_vs_no"] == m["auc_fit_vs_no"] == 1.0
     assert m["mean_per_cv_spearman"] > 0.9
+
+
+def test_replay_returns_pod_rows_and_flags_missing_penalties(tmp_path):
+    import json
+    import pytest
+    from scripts.match_eval import MissingGeneration, Replay
+    (tmp_path / "prompts.jsonl").write_text(json.dumps({"id": "cv_x", "kind": "resume", "system": "s", "user": "u"}) + "\n")
+    (tmp_path / "preds.jsonl").write_text(json.dumps({"id": "cv_x", "prediction": "{}", "finish_reason": "length",
+                                                      "repetition_penalty": 1.05}) + "\n")
+    replay = Replay(tmp_path / "prompts.jsonl", [tmp_path / "preds.jsonl"])
+    assert replay.complete("s", "u", 1.05) == ("{}", "length")
+    with pytest.raises(MissingGeneration):
+        replay.complete("s", "u", 1.1)
