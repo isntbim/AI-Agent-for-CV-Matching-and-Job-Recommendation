@@ -31,17 +31,20 @@ DIMS = ["skills", "title", "experience", "education", "industry", "location", "s
 
 def build() -> None:
     from scripts import match_eval as m
-    pairs, get, docs = m.load_pairs(), m.caches(m.Replay(m.OUT / "prompts.jsonl", [])), {}
+    pairs, get, local, docs = m.load_pairs(), m.caches(m.Replay(m.OUT / "prompts.jsonl", [])), m.caches(), {}
     for p in pairs:
         for kind, key in (("resume", "cv"), ("job", "jd")):
             did = m.doc_id(key, p[key])
             if did not in docs:
-                cache = get(kind)
-                cache.client = None
-                try:
-                    docs[did] = cache.get(p[key], kind)
-                except Exception:  # failed extraction: its pairs are not scored, as in match_eval
-                    docs[did] = None
+                docs[did] = None  # failed extraction: its pairs are not scored, as in match_eval
+                for source in (get, local):  # A100 pod replay first, then match_eval --local-fallback
+                    cache = source(kind)
+                    cache.client = None
+                    try:
+                        docs[did] = cache.get(p[key], kind)
+                        break
+                    except Exception:
+                        pass
     slim = [{"cv": m.doc_id("cv", p["cv"]), "jd": m.doc_id("jd", p["jd"]), "label": p["label"]} for p in pairs]
     PKL.write_bytes(pickle.dumps({"docs": docs, "pairs": slim}))
 

@@ -195,6 +195,7 @@ def main() -> None:
     p.add_argument("--export-prompts", type=Path)
     p.add_argument("--replay", type=Path, nargs="+", help="pod generation files (generate.py --prompts output)")
     p.add_argument("--prompts", type=Path, default=OUT / "prompts.jsonl", help="the --export-prompts file the pod used")
+    p.add_argument("--local-fallback", action="store_true", help="with --replay: extract still-failing documents locally")
     args = p.parse_args()
     pairs = load_pairs()
     docs = {}
@@ -219,6 +220,22 @@ def main() -> None:
                 failed[name] = f"{type(exc).__name__}: {str(exc)[:200]}"
     else:
         extracted, failed = extract_all(docs, args.workers, replay)
+    local = {}
+    if replay and args.local_fallback:  # pod outputs that still fail -> local V4 (Ollama, loop surgery), named in metrics
+        redo = {k: n for k, n in docs.items() if n in failed and not failed[n].startswith("MissingGeneration")}
+        if args.score_only:
+            for key, name in redo.items():
+                cache = caches()(key[0])
+                cache.client = None
+                try:
+                    local[key] = cache.get(key[1], key[0])
+                except Exception:
+                    pass
+        else:
+            local = extract_all(redo, args.workers)[0]
+        for key in local:
+            failed.pop(docs[key])
+        extracted.update(local)
     if replay:
         retry = sorted(name for name, error in failed.items() if error.startswith("MissingGeneration"))
         (OUT / "retry_ids.txt").write_text("\n".join(retry), encoding="utf-8")
@@ -243,6 +260,7 @@ def main() -> None:
     report = {"as_of": AS_OF, "pairs_total": len(pairs), "pairs_scored": len(rows),
               "label_counts": {name: labels.count(v) for name, v in LABELS.items()},
               "documents": len(docs), "failed_documents": failed,
+              "local_fallback_documents": sorted(docs[k] for k in local),
               "mean_score_by_label": {name: statistics.mean(r["score"] for r in rows if r["label"] == v)
                                       for name, v in LABELS.items() if v in labels},
               **metrics(rows), "ci95": bootstrap(rows) if len({r["cv_id"] for r in rows}) > 1 else None}
