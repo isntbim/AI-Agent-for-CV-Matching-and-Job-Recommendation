@@ -79,6 +79,49 @@ def role(text: str | None) -> tuple[str, str | None]:
     return ROLE_INDEX.get(key, (key, None))
 
 
+# Aliases too ambiguous to trust inside a longer title ("SQL Server DBA", "device driver engineer").
+CONTAINED_EXCLUDED = {"server", "driver", "cook", "rn", "sre"}
+
+
+# Words that change whose role a title names ("Software Engineer Manager" manages engineers).
+SCOPE_WORDS = {"manager", "director", "head", "chief", "vp", "president", "supervisor", "assistant", "coordinator",
+               "foreman", "officer", "lead", "administrator", "recruiter", "instructor", "teacher", "professor"}
+
+
+def _words(text: str) -> str:
+    return " " + re.sub(r"[^a-z0-9+#]+", " ", text).strip() + " "
+
+
+def contained_role(text: str | None) -> tuple[str, str | None]:
+    """role(), falling back to whole-phrase aliases inside a decorated title ("Property Accountant" -> accountant).
+
+    A scope word outside the alias ("Software Engineer Manager") leaves the title unresolved. Several distinct
+    roles ("Data Analyst/Data Engineer") give family-only evidence when they share a family, else stay unresolved."""
+    name, family = role(text)
+    if family or not name:
+        return name, family
+    padded = _words(name)
+    spans = sorted(((padded.index(_words(alias)), padded.index(_words(alias)) + len(alias) + 1, alias)
+                    for alias in ROLE_INDEX if alias not in CONTAINED_EXCLUDED and _words(alias) in padded),
+                   key=lambda span: span[0] - span[1])  # longest first
+    kept = []
+    for start, end, alias in spans:
+        if not any(s <= start and end <= e for s, e, _ in kept):
+            kept.append((start, end, alias))
+    if not kept:
+        return name, None
+    rest = padded
+    for _, _, alias in kept:
+        rest = rest.replace(_words(alias), " ")
+    if SCOPE_WORDS & set(rest.split()):
+        return name, None
+    found = {ROLE_INDEX[alias] for _, _, alias in kept}
+    if len(found) == 1:
+        return found.pop()
+    families = {fam for _, fam in found}
+    return (name, families.pop()) if len(families) == 1 else (name, None)
+
+
 def domain_set(facts: list[str], titles: list[str]) -> set[str]:
     domains = {normalize(v).replace(" ", "_") for v in facts if normalize(v).replace(" ", "_") in ROLE_FAMILIES}
     domains.update(family for title in titles if (family := role(title)[1]))

@@ -5,8 +5,8 @@ from .models import (JobInput, ResumeInput, SalaryPreference, ScorerConfig,
                      runtime_grade, supported_coverage)
 from .models_v3 import (ATSDimensionalScoresV3, DimensionResultV3, ScoreResultV3,
                         display_score)
-from .normalization import country_name, domain_set, normalize, role
-from .rules import _latest_title, relevant_months
+from .normalization import contained_role, country_name, domain_set, normalize, role
+from .rules import _latest_title, is_partial_history, relevant_months
 from .skills_v3 import score_skills_v3
 
 
@@ -33,17 +33,21 @@ def score_pair_v3(resume: ResumeInput, job: JobInput, preferences: SalaryPrefere
     put("skills", skills_breakdown["score"], skills_breakdown["supported"],
         skills_breakdown["basis"], "R1-v3")
     candidate_title = _latest_title(resume, as_of_date)
-    cv_role, cv_family = role(candidate_title)
-    jd_role, jd_family = role(job.document.title)
+    title_role = contained_role if config.title_policy == "contained" else role
+    cv_role, cv_family = title_role(candidate_title)
+    jd_role, jd_family = title_role(job.document.title)
     known_title = bool(cv_role and jd_role and resume.facts.has("title") and job.facts.has("title")
                        and (cv_role == jd_role or (cv_family and jd_family)))
     title_score = 100 if cv_role == jd_role else 70 if cv_family and cv_family == jd_family else 0
     put("title", title_score if known_title else config.neutral, known_title,
         "canonical_role" if known_title else "missing_title_evidence", "P1")
 
-    months = relevant_months(resume, job.document.title, as_of_date)
+    lower_bound = config.experience_policy == "lower_bound"
+    months = relevant_months(resume, job.document.title, as_of_date, lower_bound=lower_bound)
     years = job.document.seniority.min_years
     exp_known = job.facts.has("experience") and resume.facts.has("experience") and months is not None and years is not None
+    if exp_known and lower_bound and months < 12 * years and is_partial_history(resume, job.document.title):
+        exp_known = False  # a short lower bound cannot show the requirement is missed
     if job.facts.has("experience") and (job.facts.no_experience_required or years == 0):
         put("experience", 100, True, "explicit_no_experience_requirement", "P2")
     elif exp_known and years > 0:

@@ -40,14 +40,18 @@ def _month(value: str | None, as_of: date, ongoing: bool = False) -> int | None:
     return parsed.year * 12 + parsed.month
 
 
-def relevant_months(resume: ResumeInput, job_title: str, as_of: date) -> int | None:
-    """Union of relevant dated intervals, never a sum of overlapping jobs."""
-    target, family = role(job_title)
+def relevant_months(resume: ResumeInput, job_title: str, as_of: date, role_fn=role,
+                    lower_bound: bool = False) -> int | None:
+    """Union of relevant dated intervals, never a sum of overlapping jobs.
+
+    lower_bound=True keeps the known relevant months when other jobs have unknown roles; the caller may then
+    only conclude that the requirement is met, never that it is missed."""
+    target, family = role_fn(job_title)
     intervals = []
     relevant = False
     ambiguous_role = False
     for work in resume.document.work:
-        name, work_family = role(work.position)
+        name, work_family = role_fn(work.position)
         if not name or not (name == target or (family and work_family == family)):
             if not name or not work_family:
                 ambiguous_role = True
@@ -58,7 +62,7 @@ def relevant_months(resume: ResumeInput, job_title: str, as_of: date) -> int | N
         if start is None or end is None or end < start:
             return None
         intervals.append((start, end))
-    if ambiguous_role:
+    if ambiguous_role and not (lower_bound and relevant):
         return None
     if not relevant:
         # Empty work list may be incomplete parsing, not proof of no experience.
@@ -70,6 +74,17 @@ def relevant_months(resume: ResumeInput, job_title: str, as_of: date) -> int | N
         else:
             merged.append([start, end])
     return sum(end - start for start, end in merged)
+
+
+def is_partial_history(resume: ResumeInput, job_title: str, role_fn=role) -> bool:
+    """True when some job's role is unknown, so relevant_months(lower_bound=True) is only a lower bound."""
+    target, family = role_fn(job_title)
+    for work in resume.document.work:
+        name, work_family = role_fn(work.position)
+        if not name or not (name == target or (family and work_family == family)):
+            if not name or not work_family:
+                return True
+    return False
 
 
 def _latest_title(resume: ResumeInput, as_of: date) -> str | None:

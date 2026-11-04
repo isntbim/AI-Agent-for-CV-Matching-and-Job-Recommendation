@@ -99,6 +99,10 @@ class ScorerConfig(StrictModel):
     allow_provisional_relations: bool = False
     # automatic = unreviewed model extractions: review-level skill warnings are reported, not a neutral fallback
     review_policy: Literal["strict", "automatic"] = "strict"
+    # contained = also match a known role alias inside a decorated title (title dimension only)
+    title_policy: Literal["exact", "contained"] = "exact"
+    # lower_bound = known relevant months may prove a requirement met even when other jobs' roles are unknown
+    experience_policy: Literal["strict", "lower_bound"] = "strict"
     lower_threshold: int = Field(default=50, ge=0, le=100)
     upper_threshold: int = Field(default=75, ge=0, le=100)
     neutral: int = Field(default=50, ge=0, le=100)
@@ -127,6 +131,9 @@ class ScorerConfig(StrictModel):
             result.pop("preferred_policy", None)
         if self.review_policy == "strict":  # historical configs serialise byte-for-byte as before
             result.pop("review_policy", None)
+        for key, default in (("title_policy", "exact"), ("experience_policy", "strict")):
+            if result.get(key) == default:
+                result.pop(key, None)
         return result
 
 

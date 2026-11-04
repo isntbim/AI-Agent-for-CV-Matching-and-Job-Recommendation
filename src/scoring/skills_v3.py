@@ -66,9 +66,40 @@ def _mentions_skill(quote: str, canonical: str) -> bool:
     return name_in_quote(canonical, quote)
 
 
+_MEMO: dict[str, tuple] = {}
+
+
+def _per_relations(name: str, config: Any, compute, extra: str = "") -> Any:
+    """Reuse a value derived from config.relations while their contents (and `extra`) are unchanged: re-deriving
+    thousands of relations for every pair was ~85% of scoring time. The key is every field of every relation (all
+    strings, ~1 ms to build), so in-place edits, reordering or replacement are all seen. One entry per name."""
+    relations = _get(config, "relations", None)
+    if not isinstance(relations, list) or len(relations) < 50:
+        return compute()
+    try:
+        key = (tuple(tuple(r.items()) if isinstance(r, dict) else tuple(vars(r).values()) for r in relations), extra)
+        hash(key)
+    except TypeError:  # unhashable field values: no memo
+        return compute()
+    hit = _MEMO.get(name)
+    if hit and hit[0] == key:
+        return hit[1]
+    value = compute()
+    _MEMO[name] = (key, value)
+    return value
+
+
+def _config_digest(config: Any) -> str:
+    if not hasattr(config, "model_dump"):
+        return _digest(config)
+    rest = json.dumps(config.model_dump(mode="json", exclude={"relations"}), sort_keys=True)
+    return _per_relations("config_sha256", config, lambda: _digest(config), rest)
+
+
 def _identity(resume: Any, job: Any, config: Any) -> dict[str, Any]:
     cv_meta, jd_meta = _get(resume, "annotation"), _get(job, "annotation")
-    relations = sorted((_plain(item) for item in _get(config, "relations", [])), key=lambda item: json.dumps(item, sort_keys=True))
+    relations_sha256 = _per_relations("relations_sha256", config, lambda: _digest(sorted(
+        (_plain(item) for item in _get(config, "relations", [])), key=lambda item: json.dumps(item, sort_keys=True))))
     resume_document, job_document = _get(resume, "document"), _get(job, "document")
     annotations = {
         "resume": {"metadata": _plain(cv_meta), "skills": _plain(_get(resume_document, "skills", []))},
@@ -90,9 +121,9 @@ def _identity(resume: Any, job: Any, config: Any) -> dict[str, Any]:
         "relation_version": _get(config, "relation_version", "empty-v1"),
         "code_sha256": _code_digest(),
         **({"review_policy": "automatic"} if _get(config, "review_policy", "strict") == "automatic" else {}),
-        "config_sha256": _digest(config),
+        "config_sha256": _config_digest(config),
         "annotation_sha256": _digest(annotations),
-        "relations_sha256": _digest(relations),
+        "relations_sha256": relations_sha256,
         "source_sha256": {"resume": _get(cv_meta, "source_sha256"), "job": _get(jd_meta, "source_sha256")},
         "text_sha256": {"resume": _get(cv_meta, "text_sha256"), "job": _get(jd_meta, "text_sha256")},
         "review_status": statuses,
@@ -336,7 +367,7 @@ def _assign(candidates: list[_Candidate], requirements: list[_Requirement], conf
     variant = _get(config, "variant", "full")
     semantic = variant in {"semantic", "proficiency", "full"}
     proficiency = variant in {"proficiency", "full"}
-    relations = _relations(config) if semantic else {}
+    relations = _per_relations("relations", config, lambda: _relations(config)) if semantic else {}
     source, sink = 0, 1 + len(candidates) + len(requirements)
     graph: list[list[_Edge]] = [[] for _ in range(sink + 1)]
 
