@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CV Match</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: a narrow upload column beside a ranked list of job cards; stacks on phones. */
+:root {
+  --bg: #eef1ef; --surface: #ffffff; --ink: #17201d; --muted: #586560; --line: #d5dcd8;
+  --accent: #0e6b5c; --accent-ink: #ffffff; --soft: #dceee9;
+  --good: #0e6b5c; --pot: #9a6511; --no: #9b3a2c; --good-bg: #dceee9; --pot-bg: #f6ead2; --no-bg: #f5e0db;
+  --display: "Be Vietnam Pro", "Segoe UI", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #111614; --surface: #1a201e; --ink: #e5ebe8; --muted: #9eaba5; --line: #2d3532;
+  --accent: #4fc0a6; --accent-ink: #0b1211; --soft: #173029;
+  --good: #6fd3b8; --pot: #e3b866; --no: #ee9a8c; --good-bg: #173029; --pot-bg: #362b16; --no-bg: #3a221e; color-scheme: dark } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--display); }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)) 0 max(16px, env(safe-area-inset-right)); }
+header { background: var(--surface); border-bottom: 1px solid var(--line); }
+header .wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; padding-block: 14px; }
+h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
+.tagline { color: var(--muted); font-size: 14px; }
+.health { margin-left: auto; font: 500 12px var(--mono); color: var(--muted); }
+.health[data-ok="false"] { color: var(--no); }
+main .wrap { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 24px; padding-block: 24px 64px; align-items: start; }
+form { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; position: sticky; top: 16px; }
+form h2 { margin: 0; font-size: 15px; }
+label { font-weight: 600; font-size: 14px; display: grid; gap: 6px; }
+.drop { border: 2px dashed var(--line); border-radius: 8px; padding: 18px 12px; text-align: center; color: var(--muted); cursor: pointer; }
+.drop.over, .drop:focus-within { border-color: var(--accent); background: var(--soft); }
+.drop input { display: block; margin: 8px auto 0; max-width: 100%; }
+textarea, input[type=date], select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; width: 100%; }
+textarea { min-height: 110px; resize: vertical; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.or { text-align: center; color: var(--muted); font-size: 13px; }
+button.go { padding: 11px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font: 800 15px var(--display); cursor: pointer; }
+button.go:disabled { opacity: .6; cursor: progress; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { color: var(--muted); font-size: 13px; margin: 0; }
+.msg { border-radius: 8px; padding: 12px 14px; }
+.msg.error { background: var(--no-bg); color: var(--ink); border: 1px solid var(--no); }
+.msg.wait { background: var(--soft); border: 1px solid var(--accent); }
+.results { display: grid; gap: 14px; min-width: 0; }
+.results > h2 { margin: 0; font-size: 15px; color: var(--muted); font-weight: 600; }
+.empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 28px; }
+.empty ol { margin: 8px 0 0; padding-left: 20px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 12px; }
+.top { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; }
+.fit { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font: 500 20px var(--mono);
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--line) 0); position: relative; }
+.fit::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); }
+.fit span { position: relative; z-index: 1; font-variant-numeric: tabular-nums; }
+.card h3 { margin: 0; font-size: 17px; text-wrap: balance; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 4px; font-size: 13px; color: var(--muted); }
+.pill { font-weight: 700; font-size: 12px; padding: 2px 9px; border-radius: 999px; }
+.pill[data-g="Good Fit"] { background: var(--good-bg); color: var(--good); }
+.pill[data-g="Potential Fit"] { background: var(--pot-bg); color: var(--pot); }
+.pill[data-g="No Fit"] { background: var(--no-bg); color: var(--no); }
+.dims { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 16px; }
+.dim { display: grid; grid-template-columns: 74px minmax(48px, 1fr) 30px; gap: 8px; align-items: center; font-size: 12px; }
+.dim .t { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.dim .f { height: 100%; background: var(--accent); }
+.dim[data-unscored] .f { background: var(--muted); opacity: .45; }
+.dim b { font: 500 12px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.why { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.chips em { font-style: normal; font-weight: 700; color: var(--muted); margin-right: 2px; }
+.chip { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line); }
+.chip.have { border-color: var(--good); color: var(--good); }
+.chip.miss { border-color: var(--no); color: var(--no); }
+details summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+details pre { margin: 8px 0 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.55 var(--mono); }
+@media (max-width: 860px) { main .wrap { grid-template-columns: minmax(0, 1fr); } form { position: static; } }
+@media (prefers-reduced-motion: no-preference) { .card { animation: rise .25s ease-out both; } @keyframes rise { from { transform: translateY(6px); opacity: .4; } } }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>CV Match</h1>
+  <span class="tagline">Upload a CV, see the best-fitting jobs and why.</span>
+  <span class="health" id="health">checking service…</span>
+</div></header>
+
+<main><div class="wrap">
+  <form id="form">
+    <h2>Your CV</h2>
+    <label class="drop" id="drop" for="file">Drop a PDF, DOCX or TXT here, or choose a file
+      <input type="file" id="file" name="file" accept=".pdf,.docx,.txt">
+    </label>
+    <div class="or">or paste the text</div>
+    <label for="text" class="sr">CV text<textarea id="text" name="text" placeholder="Paste your CV here…"></textarea></label>
+    <div class="row">
+      <label for="top">Jobs to show<select id="top" name="top"><option>3</option><option selected>5</option><option>10</option></select></label>
+      <label for="as_of">Experience up to<input type="date" id="as_of" name="as_of"></label>
+    </div>
+    <button class="go" id="go" type="submit">Find matching jobs</button>
+    <p class="note">The first match for a new CV takes about a minute: our fine-tuned model reads the whole CV. The same CV again is instant.</p>
+  </form>
+
+  <section class="results" id="results" aria-live="polite">
+    <div class="empty">
+      <strong>How it works</strong>
+      <ol>
+        <li>Our fine-tuned Qwen model extracts your skills, roles, experience and education.</li>
+        <li>Hybrid search picks 20 candidate jobs from 361 CareerViet postings.</li>
+        <li>The ranking model orders them; each result explains its score skill by skill.</li>
+      </ol>
+    </div>
+  </section>
+</div></main>
+
+<script>
+const $ = id => document.getElementById(id);
+const DIMS = ["skills", "title", "experience", "education", "industry", "location", "salary"];
+$("as_of").value = new Date().toISOString().slice(0, 10);
+
+fetch("/api/health").then(r => r.json()).then(h => {
+  $("health").textContent = `${h.jobs} jobs · extractor ${h.extractor}`;
+  $("health").dataset.ok = String(h.status === "ok");
+}).catch(() => { $("health").textContent = "service offline"; $("health").dataset.ok = "false"; });
+
+const drop = $("drop");
+["dragover", "dragenter"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(e => drop.addEventListener(e, () => drop.classList.remove("over")));
+drop.addEventListener("drop", ev => { ev.preventDefault(); if (ev.dataTransfer.files.length) $("file").files = ev.dataTransfer.files; });
+
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
+
+function card(m, i) {
+  const c = el("article", "card");
+  const top = el("div", "top");
+  const color = { "Good Fit": "var(--good)", "Potential Fit": "var(--pot)", "No Fit": "var(--no)" }[m.grade];
+  const fit = el("div", "fit"); fit.style.setProperty("--p", m.fit); fit.style.setProperty("--c", color);
+  fit.append(el("span", "", Math.round(m.fit))); fit.title = "Fit score from the ranking model (0-100)";
+  const head = el("div");
+  head.append(el("h3", "", `${i + 1}. ${m.title || m.jd}`));
+  const meta = el("div", "meta"); const pill = el("span", "pill", m.grade); pill.dataset.g = m.grade;
+  meta.append(pill, el("span", "", `rule score ${m.rule_score.toFixed(1)} · search rank ${m.retrieval_rank} · ${m.jd}`));
+  head.append(meta); top.append(fit, head);
+  const dims = el("div", "dims");
+  const unscored = (m.explanation.at(-1) || "").startsWith("Not scored") ? m.explanation.at(-1) : "";
+  DIMS.forEach(d => {
+    const row = el("div", "dim"); if (unscored.includes(d)) row.dataset.unscored = "";
+    const t = el("div", "t"), f = el("div", "f"); f.style.width = `${m.scores[d]}%`; t.append(f);
+    row.append(el("span", "", d), t, el("b", "", Math.round(m.scores[d]))); dims.append(row);
+  });
+  const why = el("ul", "why"); m.explanation.slice(1).forEach(l => why.append(el("li", "", l)));
+  const chips = el("div", "chips");
+  if (m.matched_skills.length) { chips.append(el("em", "", "Has")); m.matched_skills.slice(0, 10).forEach(s => chips.append(el("span", "chip have", s))); }
+  if (m.missing_skills.length) { chips.append(el("em", "", "Missing")); m.missing_skills.slice(0, 10).forEach(s => chips.append(el("span", "chip miss", s))); }
+  const det = el("details"); det.append(el("summary", "", "Read the job posting"), el("pre", "", m.job_text));
+  c.append(top, dims, why); if (chips.children.length) c.append(chips); c.append(det);
+  return c;
+}
+
+$("form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const res = $("results"), go = $("go");
+  const fd = new FormData($("form"));
+  if (!$("file").files.length) fd.delete("file");
+  if (!$("text").value.trim()) fd.delete("text");
+  go.disabled = true; go.textContent = "Matching…";
+  res.textContent = ""; const wait = el("div", "msg wait", "Reading your CV with the extraction model. This takes about a minute the first time…");
+  res.append(wait);
+  const t0 = Date.now(), tick = setInterval(() => { wait.textContent = `Reading your CV with the extraction model… ${Math.round((Date.now() - t0) / 1000)} s`; }, 1000);
+  try {
+    const r = await fetch("/api/match", { method: "POST", body: fd });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || `The server answered ${r.status}.`);
+    res.textContent = "";
+    res.append(el("h2", "", `${body.matches.length} best of ${body.pool} candidate jobs · ${body.seconds} s`));
+    body.matches.forEach((m, i) => res.append(card(m, i)));
+    if (Object.keys(body.skipped || {}).length) res.append(el("p", "note", `${Object.keys(body.skipped).length} job(s) could not be scored and were left out.`));
+  } catch (e) {
+    res.textContent = ""; res.append(el("div", "msg error", e.message));
+  } finally { clearInterval(tick); go.disabled = false; go.textContent = "Find matching jobs"; }
+});
+</script>
+</body>
+</html>
