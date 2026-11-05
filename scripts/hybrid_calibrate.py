@@ -15,9 +15,14 @@ LAB = Path("output/match_eval/lab")
 DIMS = ["skills", "title", "experience", "education", "industry"]  # location/salary are constant here
 
 
-def load(run: str, split: str, extra: list[str]):
-    cos = {(r["cv"], r["jd"]): r["cos"] for r in map(json.loads, (LAB / "text_cosine.jsonl").open())}
-    emb = np.load(LAB / "title_emb_bge_m3.npz")
+EMBEDDINGS = {"bge_m3": ("text_cosine.jsonl", "title_emb_bge_m3.npz"),  # text_baseline.py
+              "qwen3": ("qwen_embedding_cosine.jsonl", "title_emb_qwen3_embedding.npz")}  # qwen_embedding_baseline.py
+
+
+def load(run: str, split: str, extra: list[str], embedding: str = "bge_m3"):
+    text_file, title_file = EMBEDDINGS[embedding]
+    cos = {(r["cv"], r["jd"]): r["cos"] for r in map(json.loads, (LAB / text_file).open())}
+    emb = np.load(LAB / title_file)
     rows = [json.loads(line) for line in (LAB / f"{run}.{split}.pairs.jsonl").open()]
     feats = {"text_cos": lambda r: cos[(r["cv"], r["jd"])], "title_cos": lambda r: float(emb[r["cv"]] @ emb[r["jd"]])}
     X = np.array([[r[f"dim_{d}"] / 100 for d in DIMS] + [feats[k](r) for k in extra] for r in rows])

@@ -17,11 +17,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, f1_score, roc_auc_score
 
 from scripts import match_eval as m
-from scripts.hybrid_calibrate import cutoffs, load as load_dims
+from scripts.hybrid_calibrate import DIMS, cutoffs, load as load_dims
 from scripts.scorer_lab import split_of
 from src.retrieval.lexical import BM25
 from src.retrieval.reranker import Candidate
 
+ROOT = Path(__file__).resolve().parent.parent
 LAB = Path("output/match_eval/lab")
 KS = (1, 3, 5, 10)
 SEEDS = 10
@@ -128,6 +129,10 @@ def paired(cv, label, a, b, reps=2000) -> dict:
     return out
 
 
+FINAL = "Final: Hybrid + TF-IDF (Qwen3)"
+NO_RULES = "Qwen3 + TF-IDF + title (no rules)"
+
+
 def main() -> None:
     pairs = m.load_pairs()
     texts = {}
@@ -154,6 +159,10 @@ def main() -> None:
     scores["SBERT (MiniLM)"] = np.array([float(emb[c] @ emb[j]) for c, j in key])
     bge = {(r["cv"], r["jd"]): r["cos"] for r in map(json.loads, (LAB / "text_cosine.jsonl").open())}
     scores["BGE-M3 cosine"] = np.array([bge[k] for k in key])
+    qwen_file = LAB / "qwen_embedding_cosine.jsonl"  # scripts/qwen_embedding_baseline.py
+    if qwen_file.exists():
+        qwen = {(r["cv"], r["jd"]): r["cos"] for r in map(json.loads, qwen_file.open(encoding="utf-8"))}
+        scores["Qwen3-Embedding-4B cosine"] = np.array([qwen[k] for k in key])
     base = {(r["cv"], r["jd"]): r["score"] for s in ("dev", "test") for r in map(json.loads, (LAB / f"baseline.{s}.pairs.jsonl").open())}
     scores["V3 rule scorer"] = np.array([base[k] for k in key])
     scores["V3.1 rule scorer"] = np.array([r["score"] for r in rows])
@@ -172,6 +181,21 @@ def main() -> None:
             col = np.column_stack([extras[n] for n in names])
             fit = LogisticRegression(max_iter=5000).fit(np.hstack([Xa, col[is_dev]]), ya >= 1)
             scores[f"Hybrid + {' + '.join(names)}"] = fit.decision_function(np.hstack([np.vstack([Xa, Xb]), col]))
+    if "Qwen3-Embedding-4B cosine" in scores:  # the final ranking model: same hybrid with Qwen3 text/title cosines
+        qa, _, _, _ = load_dims("all_relations_fn", "dev", ["text_cos", "title_cos"], "qwen3")
+        qb, _, _, _ = load_dims("all_relations_fn", "test", ["text_cos", "title_cos"], "qwen3")
+        Q = np.hstack([np.vstack([qa, qb]), scores["TF-IDF + cosine"][:, None]])
+        for name, cols in ((NO_RULES, slice(len(DIMS), None)), (FINAL, slice(None))):  # ablation, then the full model
+            fit = LogisticRegression(max_iter=5000).fit(Q[is_dev][:, cols], ya >= 1)
+            scores[name] = fit.decision_function(Q[:, cols])
+        model = {"features": DIMS + ["text_cos", "title_cos", "tfidf_cos"],  # the service loads it (scripts/ats_service.py)
+                 "coefficients": fit.coef_[0].round(6).tolist(), "intercept": round(float(fit.intercept_[0]), 6),
+                 "grade_cutoffs": [round(float(c), 6) for c in cutoffs(scores[FINAL][is_dev], label[is_dev])],
+                 "fitted_on": "med2425 dev half (CV-hash split), V3.1 dims /100, Qwen3 cosines, TF-IDF cosine",
+                 "text_cos": "qwen3-embedding:4b (Ollama Q4_K_M), 2048-token context, CV with retrieval instruction",
+                 "title_cos": "qwen3-embedding:4b, CV latest title vs JD title, no instruction",
+                 "tfidf": "sublinear_tf, english stop words, fitted on all documents of the corpus"}
+        (ROOT / "configs/hybrid_qwen_v1.json").write_text(json.dumps(model, indent=1), encoding="utf-8")
 
     report, test = {}, ~is_dev
     for name, s in scores.items():
@@ -185,6 +209,11 @@ def main() -> None:
     for best in ("Hybrid + cross-encoder", "Hybrid + TF-IDF + cross-encoder", "Hybrid + TF-IDF"):
         if best in scores:
             comparisons += [(best, hybrid), (best, "TF-IDF + cosine")]
+    if "Qwen3-Embedding-4B cosine" in scores:
+        qwen = "Qwen3-Embedding-4B cosine"
+        comparisons += [(qwen, "BGE-M3 cosine"), (qwen, "TF-IDF + cosine"), ("Hybrid + TF-IDF", qwen),
+                        (FINAL, qwen), (FINAL, NO_RULES), (NO_RULES, qwen), (FINAL, "Hybrid + TF-IDF"),
+                        (FINAL, "TF-IDF + cosine")]
     if "Cross-encoder (BGE reranker)" in scores:
         comparisons += [("Cross-encoder (BGE reranker)", "TF-IDF + cosine"), (hybrid, "Cross-encoder (BGE reranker)")]
     significance = {f"{a} vs {b}": paired(cv[test], label[test], scores[a][test], scores[b][test]) for a, b in comparisons}

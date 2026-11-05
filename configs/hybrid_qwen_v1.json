@@ -1,0 +1,31 @@
+{
+ "features": [
+  "skills",
+  "title",
+  "experience",
+  "education",
+  "industry",
+  "text_cos",
+  "title_cos",
+  "tfidf_cos"
+ ],
+ "coefficients": [
+  2.088376,
+  0.133145,
+  0.124802,
+  -0.079075,
+  0.854769,
+  13.204955,
+  4.509609,
+  7.913684
+ ],
+ "intercept": -11.121165,
+ "grade_cutoffs": [
+  -0.658315,
+  1.792177
+ ],
+ "fitted_on": "med2425 dev half (CV-hash split), V3.1 dims /100, Qwen3 cosines, TF-IDF cosine",
+ "text_cos": "qwen3-embedding:4b (Ollama Q4_K_M), 2048-token context, CV with retrieval instruction",
+ "title_cos": "qwen3-embedding:4b, CV latest title vs JD title, no instruction",
+ "tfidf": "sublinear_tf, english stop words, fitted on all documents of the corpus"
+}
