@@ -17,6 +17,12 @@ APPROVED_ALIAS_RECORDS = (
      "approval_evidence": "The user approved golang -> go in the question 5 decision.",
      "proposal_evidence": "Claude Code BGE-M3 illustrative cosine Golang~Go 0.624; not an approval threshold.",
      "record": "docs/research/ats_scorer/decisions.md#d3-31"},
+    {"alias": "react js", "canonical": "react", "decision_id": "D3-31",
+     "approver": "user", "approval_relay": "Claude Code",
+     "approved_on": "2026-11-08", "review_kind": "direct_human",
+     "approval_evidence": "The user approved React JS -> react (Codex review open item #8).",
+     "proposal_evidence": "JD option 'React JS' left unmatched against CV 'React'; reactjs/react.js already map to react.",
+     "record": "docs/research/ats_scorer/decisions.md#d3-31"},
 )
 APPROVED_ALIASES = {row["alias"]: row["canonical"] for row in APPROVED_ALIAS_RECORDS}
 SKILL_ALIASES_V3 = {**SKILL_ALIASES, **APPROVED_ALIASES}
