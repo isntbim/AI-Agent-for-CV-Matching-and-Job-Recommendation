@@ -39,7 +39,8 @@ class QwenV4:
     and sent raw, as in the vLLM evaluation; greedy, no schema-constrained decoding. Ollama's repeat_penalty over the
     whole context (repeat_last_n = num_ctx) matches vLLM/HF repetition_penalty, which also covers the prompt tokens."""
 
-    def __init__(self, model: str = "qwen-v4", url: str = "http://localhost:11434", timeout: float = 1800):
+    # 127.0.0.1, not localhost: on Windows localhost tries IPv6 first, ~2 s per new connection
+    def __init__(self, model: str = "qwen-v4", url: str = "http://127.0.0.1:11434", timeout: float = 1800):
         from transformers import AutoTokenizer
 
         self.tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")

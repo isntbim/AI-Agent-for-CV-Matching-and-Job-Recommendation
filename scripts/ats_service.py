@@ -17,6 +17,7 @@ embeddings 3.1 GB); with 3 slots qwen-v4 takes 10 GB and Ollama swaps the two mo
 """
 
 import argparse
+import functools
 import json
 import math
 from datetime import date
@@ -159,30 +160,46 @@ def explain(result, grade: int | None = None, fit: float | None = None, why: str
     return lines
 
 
-def retrieve(cv_document: dict, top: int, rerank: bool) -> list[str]:
+@functools.lru_cache(maxsize=1)
+def _retrieval_index():
+    """The corpus index, its vector store and the bge-m3 query embedder: loaded once per process (~6 s on CPU)."""
     from types import SimpleNamespace
 
     from scripts.retrieval import load_index
     from src.embeddings.embedder import BGEEmbedder
     from src.retrieval.cache import EmbeddingCache
-    from src.retrieval.pipeline import RetrievalPipeline
-    from src.retrieval.reranker import BGEReranker, Candidate
-    from src.retrieval.text import resume_text
     from src.vector_db.pgvector_store import InMemoryVectorStore
 
     args = SimpleNamespace(corpus=ROOT / "output/retrieval/corpus_v2", index=ROOT / "output/retrieval/index_v2")
     docs, _, vectors, _, _, im = load_index(args)
     cache = ROOT / ".cache/retrieval"
-    text = resume_text(cv_document)
     embedder = BGEEmbedder(revision=im["revision"], device="cpu", batch_size=1, cache_folder=str(cache / "huggingface"))
-    vector = EmbeddingCache(cache / "embeddings", im["model"], im["revision"]).embed([text], embedder)[0]
     store = InMemoryVectorStore(dimension=im["dimension"])
     store.create_table("service")
     store.upsert_batch([d["id"] for d in docs], list(vectors), docs)
+    return docs, store, embedder, EmbeddingCache(cache / "embeddings", im["model"], im["revision"])
+
+
+def retrieve(cv_document: dict, top: int, rerank: bool) -> list[str]:
+    from src.retrieval.pipeline import RetrievalPipeline
+    from src.retrieval.reranker import BGEReranker, Candidate
+    from src.retrieval.text import resume_text
+
+    docs, store, embedder, emb_cache = _retrieval_index()
+    text = resume_text(cv_document)
+    vector = emb_cache.embed([text], embedder)[0]
+    cache = ROOT / ".cache/retrieval"
     reranker = BGEReranker(device="cpu", cache_dir=str(cache / "huggingface")) if rerank else None
     result = RetrievalPipeline([Candidate(d["id"], d["text"], 0) for d in docs], store, None, reranker).query(text, vector)
     # "results" is capped at 10 for the retrieval benchmark; without the reranker the full fused list is the same order
     return [c.id for c in (result["results"] if rerank else result["hybrid"])[:top]]
+
+
+@functools.lru_cache(maxsize=1)
+def _llm():
+    """The V4 extractor client (its HF tokenizer takes 2-9 s to load): one per process, shared by requests."""
+    from src.scoring.v4_client import QwenV4
+    return QwenV4()
 
 
 def _cache(as_of: str | None = None, client: V4Client | None = None) -> ExtractionCache:
@@ -209,7 +226,7 @@ def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[s
     """The service call: extract the CV, retrieve `pool` JDs, score each with V3.1, return the best `top` explained.
     A JD whose extraction fails is reported in `skipped`, not silently dropped; a JD whose text repeats an earlier
     one in the pool is left out."""
-    client, config = V4Client(), v31_config()
+    client, config = V4Client(_llm()), v31_config()
     resume = _cache(as_of, client).get(cv_text, "resume")
     retrieved = not jd_ids
     jd_ids = jd_ids or retrieve(resume.document.model_dump(mode="json"), pool, rerank)

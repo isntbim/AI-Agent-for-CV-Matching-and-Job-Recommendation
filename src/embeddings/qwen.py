@@ -9,7 +9,8 @@ INSTRUCT = "Instruct: Given a candidate's resume, retrieve job descriptions that
 
 
 class QwenEmbedder:
-    def __init__(self, url: str = "http://localhost:11434", timeout: float = 600):
+    # 127.0.0.1, not localhost: on Windows localhost tries IPv6 first, ~2 s per new connection
+    def __init__(self, url: str = "http://127.0.0.1:11434", timeout: float = 600):
         self.url, self.timeout = url, timeout
 
     def encode(self, texts: list[str], query: bool = False, batch: int = 8) -> np.ndarray:

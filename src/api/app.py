@@ -27,6 +27,7 @@ LOCK = threading.Lock()  # shortcut: one match at a time (one GPU); a queue with
 async def lifespan(app: FastAPI):
     STATE["ranker"] = svc.corpus_ranker()  # bge-m3 + TF-IDF over the corpus, loaded once (~20 s on CPU)
     STATE["paths"] = svc._jd_paths()
+    svc._retrieval_index(), svc._llm()  # bge-m3 index and extractor tokenizer: load now, not on the first request
     yield
 
 
@@ -74,7 +75,7 @@ def index() -> FileResponse:
 def health() -> dict:
     import httpx
     try:
-        ollama = httpx.get("http://localhost:11434/api/version", timeout=2).status_code == 200
+        ollama = httpx.get("http://127.0.0.1:11434/api/version", timeout=2).status_code == 200
     except httpx.HTTPError:
         ollama = False
     return {"status": "ok" if ollama else "degraded", "extractor": "up" if ollama else "down: start `ollama serve`",

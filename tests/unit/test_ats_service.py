@@ -90,7 +90,8 @@ def test_match_leaves_out_a_repeated_jd_text(tmp_path, monkeypatch):
                 raise ValueError(text)  # every JD lands in `skipped`, which shows which ones were tried
             return None
     monkeypatch.setattr(svc, "ROOT", tmp_path)
-    monkeypatch.setattr(svc, "V4Client", lambda: None)
+    monkeypatch.setattr(svc, "V4Client", lambda llm=None: None)
+    monkeypatch.setattr(svc, "_llm", lambda: None)
     monkeypatch.setattr(svc, "_cache", lambda *a, **k: Cache())
     monkeypatch.setattr(svc, "_jd_paths", lambda: {j: f"{j}.txt" for j in "abc"})
     out = svc.match("cv", "2026-11-08", jd_ids=["a", "b", "c"])
