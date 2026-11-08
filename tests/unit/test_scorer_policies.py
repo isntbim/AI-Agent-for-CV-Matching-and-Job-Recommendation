@@ -44,6 +44,17 @@ def test_lower_bound_only_proves_a_requirement_met():
     assert not score_pair_v3(cv, jd, config=lower, as_of_date=AS_OF).dimensions["experience"].supported
 
 
+def test_experience_reads_roles_like_the_title_policy():
+    cv, jd = inputs()  # 48 relevant months by 2024-01
+    cv.document.work = [WorkExperience(position="Staff Accountant", start_date="2020-01", end_date="Present")]
+    jd.document.title, jd.document.seniority.min_years = "GENERAL ACCOUNTANT", 2
+    policy = STRICT.model_copy(update={"title_policy": "contained", "experience_policy": "lower_bound"})
+    exp = score_pair_v3(cv, jd, config=policy, as_of_date=AS_OF).dimensions["experience"]
+    assert exp.supported and exp.score == 100  # was 0: exact role() gave the JD title no family
+    jd.document.title = "Kỹ sư Phát triển phần mềm"  # no known role family: 0 relevant months proves nothing
+    assert not score_pair_v3(cv, jd, config=policy, as_of_date=AS_OF).dimensions["experience"].supported
+
+
 def test_contained_role_scope_words_and_compounds():
     assert contained_role("Software Engineer Manager")[1] is None  # manages engineers, not one
     assert contained_role("Data Analyst/Data Engineer") == ("data analyst/data engineer", "data")  # family only

@@ -44,11 +44,13 @@ def score_pair_v3(resume: ResumeInput, job: JobInput, preferences: SalaryPrefere
         "canonical_role" if known_title else "missing_title_evidence", "P1")
 
     lower_bound = config.experience_policy == "lower_bound"
-    months = relevant_months(resume, job.document.title, as_of_date, lower_bound=lower_bound)
+    # Same role reading as the title dimension, so "GENERAL ACCOUNTANT" vs "Staff Accountant" is relevant work.
+    months = relevant_months(resume, job.document.title, as_of_date, role_fn=title_role, lower_bound=lower_bound)
     years = job.document.seniority.min_years
     exp_known = job.facts.has("experience") and resume.facts.has("experience") and months is not None and years is not None
-    if exp_known and lower_bound and months < 12 * years and is_partial_history(resume, job.document.title):
-        exp_known = False  # a short lower bound cannot show the requirement is missed
+    if exp_known and lower_bound and months < 12 * years and (
+            is_partial_history(resume, job.document.title, role_fn=title_role) or (months == 0 and not jd_family)):
+        exp_known = False  # a short lower bound, or a JD title with no known role family, cannot show a miss
     if job.facts.has("experience") and (job.facts.no_experience_required or years == 0):
         put("experience", 100, True, "explicit_no_experience_requirement", "P2")
     elif exp_known and years > 0:

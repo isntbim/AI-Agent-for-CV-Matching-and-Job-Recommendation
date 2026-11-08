@@ -65,3 +65,33 @@ def test_why_names_the_driver_and_good_fit_without_skills_is_flagged():
     assert not any(l.startswith("Caution") for l in explain(result, grade=1, fit=60))
     assert "Found in your CV text (not in the extracted skills list): c#." in lines
     assert "Also asked for, not scored (soft skills, languages, Vietnam-specific law): communication, english." in lines
+    assert not any(l.startswith("Title and experience not scored") for l in lines)
+    assert any(l.startswith("Title and experience not scored: your CV's job titles are too general to compare (IT, Leader)")
+               for l in explain(result, vague=["IT", "Leader"]))
+
+
+def test_vague_titles_only_when_no_title_names_a_role():
+    from types import SimpleNamespace
+    from scripts.ats_service import vague_titles
+    cv = lambda *ps: SimpleNamespace(document=SimpleNamespace(work=[SimpleNamespace(position=p) for p in ps]))
+    assert vague_titles(cv("IT", "Leader", "Leader", None)) == ["IT", "Leader"]
+    assert vague_titles(cv("IT", "Staff Accountant")) == []
+    assert vague_titles(cv()) == []
+
+
+def test_match_leaves_out_a_repeated_jd_text(tmp_path, monkeypatch):
+    import scripts.ats_service as svc
+    for name, text in (("a", "Same posting"), ("b", "Other posting"), ("c", "Same posting")):
+        (tmp_path / f"{name}.txt").write_text(text, encoding="utf-8")
+
+    class Cache:
+        def get(self, text, kind):
+            if kind == "job":
+                raise ValueError(text)  # every JD lands in `skipped`, which shows which ones were tried
+            return None
+    monkeypatch.setattr(svc, "ROOT", tmp_path)
+    monkeypatch.setattr(svc, "V4Client", lambda: None)
+    monkeypatch.setattr(svc, "_cache", lambda *a, **k: Cache())
+    monkeypatch.setattr(svc, "_jd_paths", lambda: {j: f"{j}.txt" for j in "abc"})
+    out = svc.match("cv", "2026-11-08", jd_ids=["a", "b", "c"])
+    assert sorted(out["skipped"]) == ["a", "b"]  # c repeats a's text

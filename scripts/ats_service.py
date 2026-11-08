@@ -3,7 +3,7 @@ the final ranking model reranks the pool -> templated explanation built only fro
 
 Ranking = "Hybrid + TF-IDF (Qwen3)" (configs/hybrid_qwen_v1.json, written by scripts/match_ir_eval.py): logistic
 weights on the V3.1 dimensions, Qwen3-Embedding-4B whole-text and title cosines and TF-IDF cosine, fitted on the
-med2425 dev half (test NDCG@10 0.629 vs Qwen3 cosine 0.591, p<0.001; output/match_eval/lab/benchmark.md). The weights
+med2425 dev half (test NDCG@10 0.630 vs Qwen3 cosine 0.591, p<0.001; output/match_eval/lab/benchmark.md). The weights
 come from English synthetic labels; on the Vietnamese CareerViet corpus they are unvalidated until human labels exist.
 
   python -m scripts.ats_service CV.txt --as-of 2026-11-02 [--top 5] [--pool 20] [--jd jd_001 ...] [--rerank]
@@ -24,6 +24,7 @@ from pathlib import Path
 
 from src.scoring.extraction import ExtractionCache, write_json
 from src.scoring.models import ScorerConfig
+from src.scoring.normalization import contained_role
 from src.scoring.rules import _latest_title
 from src.scoring.runtime_v3 import score_pair_v3
 from src.scoring.v4_client import V4Client
@@ -102,10 +103,18 @@ class Ranker:
         return 0 if logit < lo else 1 if logit < hi else 2
 
 
-def explain(result, grade: int | None = None, fit: float | None = None, why: str | None = None) -> list[str]:
+def vague_titles(resume) -> list[str]:
+    """The CV's job titles when none of them names a known role ("IT", "Leader"): title and experience can't be compared."""
+    titles = list(dict.fromkeys(w.position for w in resume.document.work if w.position))
+    return titles if titles and not any(contained_role(t)[1] for t in titles) else []
+
+
+def explain(result, grade: int | None = None, fit: float | None = None, why: str | None = None,
+            vague: list[str] | None = None) -> list[str]:
     """Plain-English reasons, one line per dimension, read straight off the score result. With `grade`/`fit` the
     headline gives the ranking model's verdict and keeps the rule score beside it; `why` says what drove that fit.
-    A Good Fit whose listed requirements matched no CV skill gets a caution: the verdict then rests on similarity."""
+    A Good Fit whose listed requirements matched no CV skill gets a caution: the verdict then rests on similarity.
+    `vague` (from vague_titles) explains why title/experience could not be scored."""
     d = result.dimensions
     head = (f"{GRADES[grade]}: fit {fit:.0f}/100 (rule score {result.overall_score:.1f}/100)." if grade is not None
             else f"{GRADES[result.grade]}: {result.overall_score:.1f}/100.")
@@ -142,6 +151,9 @@ def explain(result, grade: int | None = None, fit: float | None = None, why: str
         if d[key].supported:
             lines.append(f"{key.capitalize()} {d[key].score:.0f}/100.")
     unknown = [k for k, v in d.items() if not v.supported]
+    if vague and ({"title", "experience"} & set(unknown)):
+        lines.append(f"Title and experience not scored: your CV's job titles are too general to compare "
+                     f"({', '.join(vague[:4])}). Name the role, e.g. \"IT Manager\" or \".NET Team Leader\".")
     if unknown:
         lines.append(f"Not scored (evidence missing or inconclusive, neutral value used): {', '.join(unknown)}.")
     return lines
@@ -195,15 +207,20 @@ def corpus_ranker() -> "Ranker":
 def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[str] | None = None,
           rerank: bool = False, ranker: "Ranker | None" = None) -> dict:
     """The service call: extract the CV, retrieve `pool` JDs, score each with V3.1, return the best `top` explained.
-    A JD whose extraction fails is reported in `skipped`, not silently dropped."""
+    A JD whose extraction fails is reported in `skipped`, not silently dropped; a JD whose text repeats an earlier
+    one in the pool is left out."""
     client, config = V4Client(), v31_config()
     resume = _cache(as_of, client).get(cv_text, "resume")
     retrieved = not jd_ids
     jd_ids = jd_ids or retrieve(resume.document.model_dump(mode="json"), pool, rerank)
-    paths, rows, skipped, scored = _jd_paths(), [], {}, []
+    paths, rows, skipped, scored, seen = _jd_paths(), [], {}, [], set()
     for rank, jd in enumerate(jd_ids, 1):
         try:
-            job = _cache(client=client).get((ROOT / paths[jd]).read_text(encoding="utf-8"), "job")
+            text = (ROOT / paths[jd]).read_text(encoding="utf-8")
+            if text in seen:  # the corpus holds a few postings twice (jd_150 = jd_342): identical text, identical score
+                continue
+            seen.add(text)
+            job = _cache(client=client).get(text, "job")
         except Exception as exc:  # one bad JD must not sink the whole answer
             skipped[jd] = f"{type(exc).__name__}: {str(exc)[:200]}"
             continue
@@ -220,7 +237,8 @@ def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[s
             rows.append({"jd": jd, "title": job.document.title, "retrieval_rank": rank, "fit": round(fit, 1),
                          "_logit": logit, "grade": GRADES[grade], "rule_score": result.overall_score,
                          "scores": result.scores.model_dump(), "matched_skills": result.matched_skills,
-                         "missing_skills": result.missing_skills, "explanation": explain(result, grade, fit, Ranker.why(contrib)),
+                         "missing_skills": result.missing_skills,
+                         "explanation": explain(result, grade, fit, Ranker.why(contrib), vague_titles(resume)),
                          "evidence": {k: v.evidence[:3] for k, v in result.dimensions.items() if v.supported and v.evidence}})
     rows.sort(key=lambda r: (-r.pop("_logit"), r["retrieval_rank"]))
     return {"as_of": as_of, "retrieved": retrieved, "pool": len(jd_ids), "matches": rows[:top], "skipped": skipped,
