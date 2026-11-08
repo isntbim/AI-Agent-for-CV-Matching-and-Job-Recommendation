@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LAB = Path("output/match_eval/lab")
 KS = (1, 3, 5, 10)
 SEEDS = 10
+RUN = "v32_text_soft"  # the V3.1 lab run (scripts/scorer_lab.py) whose dimension scores feed the rule rows and hybrids
 
 
 def per_cv_metrics(cv: np.ndarray, label: np.ndarray, score: np.ndarray) -> dict:
@@ -139,7 +140,7 @@ def main() -> None:
     for p in pairs:
         texts.setdefault(m.doc_id("cv", p["cv"]), p["cv"])
         texts.setdefault(m.doc_id("jd", p["jd"]), p["jd"])
-    rows = [json.loads(line) for split in ("dev", "test") for line in (LAB / f"all_relations_fn.{split}.pairs.jsonl").open()]
+    rows = [json.loads(line) for split in ("dev", "test") for line in (LAB / f"{RUN}.{split}.pairs.jsonl").open()]
     key = [(r["cv"], r["jd"]) for r in rows]  # the 48,010 scored pairs, dev then test
     cv = np.array([k[0] for k in key])
     label = np.array([r["label"] for r in rows])
@@ -166,8 +167,8 @@ def main() -> None:
     base = {(r["cv"], r["jd"]): r["score"] for s in ("dev", "test") for r in map(json.loads, (LAB / f"baseline.{s}.pairs.jsonl").open())}
     scores["V3 rule scorer"] = np.array([base[k] for k in key])
     scores["V3.1 rule scorer"] = np.array([r["score"] for r in rows])
-    Xa, ya, _, _ = load_dims("all_relations_fn", "dev", ["text_cos", "title_cos"])
-    Xb, _, _, _ = load_dims("all_relations_fn", "test", ["text_cos", "title_cos"])
+    Xa, ya, _, _ = load_dims(RUN, "dev", ["text_cos", "title_cos"])
+    Xb, _, _, _ = load_dims(RUN, "test", ["text_cos", "title_cos"])
     lr = LogisticRegression(max_iter=5000).fit(Xa, ya >= 1)
     scores["Hybrid (V3.1 + BGE-M3 text/title)"] = np.concatenate([lr.decision_function(Xa), lr.decision_function(Xb)])
     rerank_file = LAB / "reranker_scores.jsonl"  # scripts/reranker_baseline.py
@@ -182,8 +183,8 @@ def main() -> None:
             fit = LogisticRegression(max_iter=5000).fit(np.hstack([Xa, col[is_dev]]), ya >= 1)
             scores[f"Hybrid + {' + '.join(names)}"] = fit.decision_function(np.hstack([np.vstack([Xa, Xb]), col]))
     if "Qwen3-Embedding-4B cosine" in scores:  # the final ranking model: same hybrid with Qwen3 text/title cosines
-        qa, _, _, _ = load_dims("all_relations_fn", "dev", ["text_cos", "title_cos"], "qwen3")
-        qb, _, _, _ = load_dims("all_relations_fn", "test", ["text_cos", "title_cos"], "qwen3")
+        qa, _, _, _ = load_dims(RUN, "dev", ["text_cos", "title_cos"], "qwen3")
+        qb, _, _, _ = load_dims(RUN, "test", ["text_cos", "title_cos"], "qwen3")
         Q = np.hstack([np.vstack([qa, qb]), scores["TF-IDF + cosine"][:, None]])
         for name, cols in ((NO_RULES, slice(len(DIMS), None)), (FINAL, slice(None))):  # ablation, then the full model
             fit = LogisticRegression(max_iter=5000).fit(Q[is_dev][:, cols], ya >= 1)

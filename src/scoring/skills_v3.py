@@ -17,7 +17,7 @@ from typing import Any
 
 from .normalization import normalize
 from .v3_aliases import (ALIAS_POLICY_VERSION, APPROVED_ALIASES_SHA256,
-                         alias_provenance, name_in_quote, skill_name)
+                         alias_provenance, alias_spellings, name_in_quote, skill_name)
 from .v3_validation import MANDATORY, OPTIONAL, RANK, POLICY_VERSION, beginner_wording_supported, direct_level, title_requires_review
 from src.parser.skill_v3 import normalize_beginner
 from .models_v3 import PRECISION_POLICY_VERSION, display_score
@@ -473,8 +473,93 @@ def _assign_separately(candidates, requirements, config):
     return result
 
 
-def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
-    """Return an auditable, JSON-serializable result for the opt-in v3 ruleset."""
+# skills_policy "text_and_soft": soft skills and languages are listed apart, not scored (an extractor never lists
+# "communication" or "English" as a CV skill, so they always read as missing), and a specific requirement the
+# extraction missed still counts when the CV text names it. Names are normalized with skill_name before lookup.
+# shortcut: a fixed bilingual list, not a classifier; extend it when a new soft requirement shows up as "missing".
+SOFT_SKILLS = frozenset(skill_name(s) for s in (
+    "communication", "communication skills", "written communication", "verbal communication", "oral communication",
+    "interpersonal", "interpersonal skills", "teamwork", "team work", "team spirit", "collaboration",
+    "cross-department collaboration", "problem-solving", "problem solving", "solving problems", "analytical",
+    "analytical skills", "analytical thinking", "analytical mindset", "logical thinking", "critical thinking",
+    "creative thinking", "strategic thinking", "think creatively and innovatively", "presentation", "presentation skills",
+    "leadership", "leader", "ownership", "take ownership", "proactive", "proactive attitude", "can-do attitude",
+    "resilience", "adapt", "adaptability", "learn", "learn new technologies", "work independently",
+    "working independently", "work under pressure", "working under pressure", "multitasking", "handle multiple tasks",
+    "organizational", "organizational skills", "organization", "time management", "deadline management",
+    "attention to detail", "detail", "prioritize", "negotiation", "persuasion", "influencing", "influencing skills",
+    "decision making", "driving tasks", "assertiveness", "people dealing", "value contribution",
+    "intercultural", "coordination", "verbal", "written", "oral", "travel", "creative tasks executive",
+    "english", "vietnamese", "japanese", "chinese", "korean", "toeic",
+    "giao tiếp", "làm việc nhóm", "làm việc độc lập", "phối hợp làm việc nhóm", "tư duy", "tư duy logic",
+    "giải quyết vấn đề", "thuyết trình", "lãnh đạo", "chịu áp lực", "quản lý thời gian", "tiếng anh", "tiếng nhật",
+    "tiếng trung", "tiếng hàn", "anh văn", "ngoại ngữ"))
+# Vietnam-specific law and insurance: a jurisdiction requirement like a language, listed apart with the soft skills.
+LOCAL_LAW = re.compile(r"vietnam|việt nam|labou?r code|\bshui\b|bhxh|luật lao động")
+# An option the extraction did not split: "Pinia or Redux", "Object-Oriented Programming (OOP)".
+OPTION_PARTS = re.compile(r"\s+or\s+|\s*[()]\s*", re.I)
+TEXT_MATCH_MARK = re.compile(r"[A-Z0-9#+./]")
+# Names that are also everyday CV prose ("City, State", "I go to", "I excel at", "Project:"): never matched from text,
+# whatever their case; the extraction must list them. Lowercase names also need 4+ letters.
+GENERIC_WORDS = frozenset({"state", "states", "city", "view", "views", "function", "functions", "routing", "runtime",
+                           "compiling", "detail", "details", "support", "service", "services", "product", "products",
+                           "business", "operations", "office", "team", "teams", "project", "process", "quality",
+                           "planning", "management", "data", "web", "work", "good", "basic", "knowledge", "experience",
+                           "go", "excel", "word", "access", "spring", "rest", "swift", "rust", "ruby", "dart", "express",
+                           "chef", "puppet", "outlook", "slack", "unity", "networking", "security", "design", "sales"})
+# Product names that are also English words: matched only Capitalised or UPPER in the CV text (with approved alias
+# spellings: Golang) and not used as a verb ("Excel, Word", "Excel for modelling" yes; "excel at", "Go to" no).
+# Spring/Access stay text-blind: "Spring 2024 internship", "Access to ..." read the same either way.
+PRODUCT_WORDS = frozenset({"excel", "word", "outlook", "go", "swift", "rust", "ruby", "dart", "express", "unity",
+                           "slack", "chef", "puppet"})
+NEGATION = re.compile(r"\b(?:no|not|without|lack(?:ing)?|never|little|limited|chưa|không)\b[^.;\n]{0,50}$", re.I)
+# shortcut: text matches are taken greedily in requirement order, not re-allocated like extracted skills; only two
+# requirements sharing an option ([Python or SQL], [Python]) can lose a fulfilment. Fold into _assign if that shows up.
+
+
+@lru_cache(maxsize=4096)
+def _text_variants(text: str) -> tuple[str, ...]:
+    """The CV text in every line-break reading name_in_quote accepts, normalized once per CV (sorted: deterministic)."""
+    from .v3_aliases import HYPHEN_WRAP, PDF_MARKS, WORD_WRAP
+    text = PDF_MARKS.sub("", text)
+    return tuple(sorted({normalize(t) for t in (text, HYPHEN_WRAP.sub("", text), HYPHEN_WRAP.sub("-", text), WORD_WRAP.sub("", text))}))
+
+
+def _text_mention(requirement: _Requirement, cv_text: str, taken: set[str]) -> tuple[str, str] | None:
+    """(option, CV excerpt) for the first option the CV text names as a whole word, not negated just before ("no SQL
+    experience") and not already used by another requirement (`taken`: one CV skill fulfils one requirement, as in the
+    allocator). A name written with a capital, digit or one of # + . / in the JD (SQL, C#, HTML5) qualifies; a
+    lowercase one needs 4+ letters; no GENERIC_WORDS name ever does. The excerpt is the original CV text when the
+    name is found there case-insensitively, else the normalized text. Each part of an unsplit option is tried too,
+    and a plural JD name also matches its singular ("RESTful APIs" ~ "RESTful API")."""
+    parts = (p for o in requirement.original_options for p in dict.fromkeys([o, *OPTION_PARTS.split(o or "")]))
+    for original in (p for p in parts if re.search(r"[^\W\d_]", p or "")):
+        name = skill_name(original or "")
+        if name in PRODUCT_WORDS and name not in taken:
+            forms = sorted({f for v in alias_spellings(original) for f in (v.capitalize(), v.upper())})
+            pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, forms)) + r")(?!\w)(?!\s+(?:in|at|to)\b)")
+            hit = next((h for h in pattern.finditer(cv_text) if not NEGATION.search(cv_text[max(0, h.start() - 60):h.start()])), None)
+            if hit:
+                return name, " ".join(cv_text[max(0, hit.start() - 50): hit.end() + 50].split())
+            continue
+        if name in taken or name in GENERIC_WORDS or (not TEXT_MATCH_MARK.search(original or "") and len(name) < 4):
+            continue
+        for value in sorted(alias_spellings(original)):
+            if len(value) < 2 or value in GENERIC_WORDS:
+                continue
+            stem = value[:-1] if len(value) > 4 and value.endswith("s") and not value.endswith("ss") else value
+            body = re.escape(stem) + "s?" if stem != value and stem not in GENERIC_WORDS else re.escape(value)
+            pattern = re.compile(r"(?<!\w)" + body + r"(?!\w)", re.I)
+            for text in (cv_text, *_text_variants(cv_text)):
+                hit = next((h for h in pattern.finditer(text) if not NEGATION.search(text[max(0, h.start() - 60):h.start()])), None)
+                if hit:
+                    return name, " ".join(text[max(0, hit.start() - 50): hit.end() + 50].split())
+    return None
+
+
+def score_skills_v3(resume: Any, job: Any, config: Any, cv_text: str | None = None) -> dict[str, Any]:
+    """Return an auditable, JSON-serializable result for the opt-in v3 ruleset. `cv_text` (the raw CV) is used only
+    under skills_policy "text_and_soft"."""
     variant = _get(config, "variant", "full")
     depth_policy = _get(config, "depth_policy", "full") or "full"
     preferred_policy = _get(config, "preferred_policy", "separate") or "separate"
@@ -486,6 +571,10 @@ def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
         raise ValueError("Unknown Preferred policy")
     candidates, cv_warnings, cv_merges = _prepare_candidates(resume)
     requirements, jd_warnings, jd_merges = _prepare_requirements(job)
+    text_policy = _get(config, "skills_policy", "extracted") == "text_and_soft"
+    soft = [item for item in requirements if text_policy and (set(item.options) <= SOFT_SKILLS
+            or all(LOCAL_LAW.search(option) for option in item.options))]
+    requirements = [item for item in requirements if item not in soft]
     warnings = cv_warnings + jd_warnings
     if not candidates and not _get(_get(resume, "facts"), "no_skills", False):
         warnings.append("CV has no supported skills and no explicit no-skills evidence.")
@@ -537,6 +626,14 @@ def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
         "unknown_requirements": [],
         "explanation": "Skills evidence is incomplete; the neutral score is 50 and Core failure is not inferred.",
     }
+    if text_policy:
+        result["soft_skills"] = [" or ".join(item.options) for item in soft]
+        if cv_text:  # the raw text changes fulfilment, so it is part of the audit identity
+            result["identity"]["cv_text_sha256"] = hashlib.sha256(cv_text.encode()).hexdigest()
+        if soft and not requirements:
+            result.update(basis="soft_skills_only", explanation="The job lists only soft skills, languages and "
+                          "Vietnam-specific law, which are not scored; the neutral skills score is 50.")
+            return result
     if not requirements and known_no_core:
         result.update(basis="no_requirements", gate_status="not_applicable", explanation="No supported skill requirements are available; the neutral skills score is 50.")
         return result
@@ -569,9 +666,17 @@ def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
     gate_numerator = 0.0
     bonus_numerator = 0.0
     required_denominator = 0.0
+    taken = {candidates[m.candidate_index].name for m in matches.values()} | {m.option for m in matches.values()}
+    taken |= {skill_name(_get(d, "name", "")) for g in (_get(_get(resume, "document"), "skills", []) or [])
+              for d in (_get(g, "details", []) or [])
+              if _get(_get(d, "provenance"), "review_status") == "rejected"}  # a rejected skill never returns via text
     for index, requirement in enumerate(requirements):
         match = matches.get(index)
-        candidate = candidates[match.candidate_index] if match else None
+        mention = _text_mention(requirement, cv_text, taken) if text_policy and cv_text and not match else None
+        if mention:  # the CV text names the skill but the extraction missed it: a full match quoted from the CV
+            match = _Match(-1, index, mention[0], 1.0, True, 1.0, "cv_text")
+            taken.add(mention[0])
+        candidate = candidates[match.candidate_index] if match and match.candidate_index >= 0 else None
         coefficient = match.coefficient if match else 0.0
         factor = match.factor if match else 1.0
         exact = bool(match and match.exact)
@@ -616,6 +721,9 @@ def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
             "bonus_eligible": bonus_eligible,
             "option_details": list(requirement.option_details),
         }
+        if mention:
+            row.update(candidate_skill=mention[0], depth_status="cv_text_mention")
+            row["evidence"]["skill_quote"] = mention[1]
         result["requirements"].append(row)
         result[{"full": "fulfilled_requirements", "partial": "partial_requirements", "unmet": "unmet_requirements"}[status]].append(requirement.id)
         label = " or ".join(requirement.options)
@@ -635,8 +743,8 @@ def score_skills_v3(resume: Any, job: Any, config: Any) -> dict[str, Any]:
         if match and match.provisional:
             result["identity"]["provisional"] = True
         result["evidence"].append(requirement.quote)
-        if candidate:
-            result["evidence"].append(candidate.skill_quote)
+        if candidate or mention:
+            result["evidence"].append(candidate.skill_quote if candidate else mention[1])
 
     shares = {group: 1.0 if variant == "equal_groups" else GROUP_SHARES[group] for group in GROUP_WEIGHTS}
     if preferred_policy == "separate" and not preferred_only_fallback:

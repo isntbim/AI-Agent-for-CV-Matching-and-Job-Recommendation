@@ -4,7 +4,7 @@
 
 The export is {labeller id: {cv id: {jd id: 0|1|2}}} (No / Potential / Good Fit), read from the labelling page's
 store. Reported: inter-annotator agreement (percent, Cohen's kappa, quadratic-weighted kappa) on pairs both labelled,
-then each method ranking every labelled candidate of a CV, against the consensus (mean of the two labels): NDCG@5 with
+then each method ranking every labelled candidate of a CV, against the consensus (mean of the labels a pair has): NDCG@5 with
 gain = mean label, P@3 (relevant = mean >= 1), MRR, Kendall tau; the service ranking vs TF-IDF is tested by a paired
 CV bootstrap and sign-flip permutation, as in scripts/match_ir_eval.py.
 """
@@ -26,7 +26,8 @@ SERVICE = "Final: Hybrid + TF-IDF (Qwen3, service)"
 
 
 def agreement(export: dict) -> tuple[dict, dict]:
-    """(agreement stats, consensus {(cv, jd): mean label}) over pairs every labeller labelled."""
+    """(agreement stats over pairs every labeller labelled, consensus {(cv, jd): mean label} over every labelled pair:
+    label_set_v1 was split between the labellers with no overlap, so most pairs carry one label)."""
     people = sorted(export)
     keys = sorted({(c, j) for p in people for c, js in export[p].items() for j in js})
     both = [k for k in keys if all(k[1] in export[p].get(k[0], {}) for p in people)]
@@ -38,7 +39,8 @@ def agreement(export: dict) -> tuple[dict, dict]:
                   "cohen_kappa": round(float(cohen_kappa_score(a, b)), 4),
                   "weighted_kappa_quadratic": round(float(cohen_kappa_score(a, b, weights="quadratic")), 4),
                   "label_counts": {p: np.bincount([export[p][c][j] for c, j in both], minlength=3).tolist() for p in people[:2]}}
-    consensus = {k: float(np.mean([export[p][k[0]][k[1]] for p in people])) for k in both}
+    consensus = {k: float(np.mean([export[p][k[0]][k[1]] for p in people if k[1] in export[p].get(k[0], {})]))
+                 for k in keys}
     return stats, consensus
 
 
@@ -91,7 +93,7 @@ def method_scores(pairs: list[tuple[str, str]]) -> dict[str, dict]:
         results, jobs = {}, {}
         for j in jds:
             jobs[j] = cache().get(jd_text[j], "job")
-            results[j] = score_pair_v3(resume, jobs[j], as_of_date=as_of, config=config)
+            results[j] = score_pair_v3(resume, jobs[j], as_of_date=as_of, config=config, cv_text=cv_text[c])
         service = ranker.scores(cv_text[c], title, [(j, jobs[j].document.title, results[j].unrounded_scores.model_dump()) for j in jds])
         titles = bge.encode([title or "unknown"] + [jobs[j].document.title or "unknown" for j in jds], normalize_embeddings=True)
         w = hybrid["coefficients"]

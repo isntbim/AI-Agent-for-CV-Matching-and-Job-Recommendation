@@ -10,19 +10,19 @@
   "tfidf_cos"
  ],
  "coefficients": [
-  2.088376,
-  0.133145,
-  0.124802,
-  -0.079075,
-  0.854769,
-  13.204955,
-  4.509609,
-  7.913684
+  1.77699,
+  0.15192,
+  0.054751,
+  -0.109029,
+  0.84147,
+  12.987382,
+  4.439613,
+  7.170059
  ],
- "intercept": -11.121165,
+ "intercept": -10.963444,
  "grade_cutoffs": [
-  -0.658315,
-  1.792177
+  -0.665753,
+  1.63085
  ],
  "fitted_on": "med2425 dev half (CV-hash split), V3.1 dims /100, Qwen3 cosines, TF-IDF cosine",
  "text_cos": "qwen3-embedding:4b (Ollama Q4_K_M), 2048-token context, CV with retrieval instruction",

@@ -8,7 +8,7 @@ def test_agreement_and_consensus():
     export = {"a": {"cv1": {"j1": 2, "j2": 0, "j3": 1}}, "b": {"cv1": {"j1": 2, "j2": 1, "j3": 1, "j9": 0}}}
     stats, consensus = agreement(export)
     assert stats["pairs_labelled_by_all"] == 3 and stats["percent_agreement"] == round(2 / 3, 4)
-    assert consensus == {("cv1", "j1"): 2.0, ("cv1", "j2"): 0.5, ("cv1", "j3"): 1.0}  # j9 only labelled by b
+    assert consensus == {("cv1", "j1"): 2.0, ("cv1", "j2"): 0.5, ("cv1", "j3"): 1.0, ("cv1", "j9"): 0.0}  # j9: b only
 
 
 def test_ranking_metrics_perfect_order():

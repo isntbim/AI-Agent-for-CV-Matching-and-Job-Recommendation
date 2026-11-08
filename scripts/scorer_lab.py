@@ -56,8 +56,9 @@ def split_of(cv_id: str) -> str:
 _state = {}
 
 
-def _init(config_json: str, weights: dict | None) -> None:
+def _init(config_json: str, weights: dict | None, texts: dict | None = None) -> None:
     _state["docs"] = pickle.loads(PKL.read_bytes())["docs"]
+    _state["texts"] = texts or {}
     _state["config"] = ScorerConfig.model_validate_json(config_json)
     if weights:  # runtime_v3 reads ATS_WEIGHTS at call time
         match_schemas.ATS_WEIGHTS.clear()
@@ -66,7 +67,8 @@ def _init(config_json: str, weights: dict | None) -> None:
 
 def _score(pair: dict) -> dict:
     docs, config = _state["docs"], _state["config"]
-    r = score_pair_v3(docs[pair["cv"]], docs[pair["jd"]], as_of_date=AS_OF, config=config)
+    r = score_pair_v3(docs[pair["cv"]], docs[pair["jd"]], as_of_date=AS_OF, config=config,
+                      cv_text=_state["texts"].get(pair["cv"]))
     dims = r.unrounded_scores.model_dump()
     return {**pair, "score": r.unrounded_overall_score, "grade": r.grade,
             "supported": {d: r.dimensions[d].supported for d in DIMS}, **{f"dim_{d}": dims[d] for d in DIMS}}
@@ -152,6 +154,7 @@ def main() -> None:
     p.add_argument("--upper", type=int, default=75)
     p.add_argument("--title-policy", choices=["exact", "contained"], default="exact")
     p.add_argument("--experience-policy", choices=["strict", "lower_bound"], default="strict")
+    p.add_argument("--skills-policy", choices=["extracted", "text_and_soft"], default="extracted")
     p.add_argument("--workers", type=int, default=8)
     args = p.parse_args()
     if args.build:
@@ -161,7 +164,11 @@ def main() -> None:
     pairs = [x for x in data["pairs"] if docs[x["cv"]] is not None and docs[x["jd"]] is not None
              and (args.split == "all" or split_of(x["cv"]) == args.split)]
     cfg = {"version": "ats-en-v3", "review_policy": "automatic", "lower_threshold": args.lower, "upper_threshold": args.upper,
-           "title_policy": args.title_policy, "experience_policy": args.experience_policy}
+           "title_policy": args.title_policy, "experience_policy": args.experience_policy,
+           "skills_policy": args.skills_policy}
+    from scripts import match_eval as m
+    texts = ({m.doc_id("cv", x["cv"]): x["cv"] for x in m.load_pairs()} if args.skills_policy == "text_and_soft"
+             else None)  # raw CV text, only read by text_and_soft
     if args.relations:
         table = SkillRelationTable.model_validate_json(args.relations.read_text(encoding="utf-8"))
         cfg.update(relations=[r.model_dump() | {"review_status": "approved"} for r in table.relations],
@@ -170,11 +177,12 @@ def main() -> None:
     weights = json.loads(args.weights) if args.weights else None
     if weights:
         assert set(weights) == set(DIMS) and abs(sum(weights.values()) - 1) < 1e-6, "weights must cover all 7 dims and sum to 1"
-    with Pool(args.workers, _init, (config_json, weights)) as pool:
+    with Pool(args.workers, _init, (config_json, weights, texts)) as pool:
         rows = pool.map(_score, pairs, chunksize=200)
     report = {"name": args.name, "split": args.split, "lower": args.lower, "upper": args.upper,
               "relations": str(args.relations) if args.relations else None, "weights": weights,
-              "title_policy": args.title_policy, "experience_policy": args.experience_policy, **metrics(rows)}
+              "title_policy": args.title_policy, "experience_policy": args.experience_policy,
+              "skills_policy": args.skills_policy, **metrics(rows)}
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / f"{args.name}.{args.split}.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     with (OUT / f"{args.name}.{args.split}.pairs.jsonl").open("w", encoding="utf-8") as f:

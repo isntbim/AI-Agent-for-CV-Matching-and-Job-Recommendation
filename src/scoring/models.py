@@ -103,6 +103,8 @@ class ScorerConfig(StrictModel):
     title_policy: Literal["exact", "contained"] = "exact"
     # lower_bound = known relevant months may prove a requirement met even when other jobs' roles are unknown
     experience_policy: Literal["strict", "lower_bound"] = "strict"
+    # text_and_soft = soft skills/languages listed apart, not scored; a skill named in the CV text counts (needs cv_text)
+    skills_policy: Literal["extracted", "text_and_soft"] = "extracted"
     lower_threshold: int = Field(default=50, ge=0, le=100)
     upper_threshold: int = Field(default=75, ge=0, le=100)
     neutral: int = Field(default=50, ge=0, le=100)
@@ -131,7 +133,7 @@ class ScorerConfig(StrictModel):
             result.pop("preferred_policy", None)
         if self.review_policy == "strict":  # historical configs serialise byte-for-byte as before
             result.pop("review_policy", None)
-        for key, default in (("title_policy", "exact"), ("experience_policy", "strict")):
+        for key, default in (("title_policy", "exact"), ("experience_policy", "strict"), ("skills_policy", "extracted")):
             if result.get(key) == default:
                 result.pop(key, None)
         return result

@@ -11,7 +11,8 @@ from .skills_v3 import score_skills_v3
 
 
 def score_pair_v3(resume: ResumeInput, job: JobInput, preferences: SalaryPreference | None = None,
-                  config: ScorerConfig | None = None, as_of_date: date | None = None) -> ScoreResultV3:
+                  config: ScorerConfig | None = None, as_of_date: date | None = None,
+                  cv_text: str | None = None) -> ScoreResultV3:
     config = config or ScorerConfig(version="ats-en-v3")
     if config.version != "ats-en-v3":
         raise ValueError("The precision runtime requires ats-en-v3")
@@ -26,7 +27,7 @@ def score_pair_v3(resume: ResumeInput, job: JobInput, preferences: SalaryPrefere
             supported=supported, basis=basis, rule_id=rule_id,
             evidence=[e.quote for obj in (resume, job) for e in obj.facts.evidence.get(key, [])])
 
-    skills_breakdown = score_skills_v3(resume, job, config)
+    skills_breakdown = score_skills_v3(resume, job, config, cv_text)  # cv_text: only skills_policy text_and_soft reads it
     matched = skills_breakdown["matched_skills"]
     missing = skills_breakdown["missing_skills"]
     preferred_coverage = skills_breakdown["preferred_skill_coverage"]

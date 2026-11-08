@@ -3,7 +3,7 @@ the final ranking model reranks the pool -> templated explanation built only fro
 
 Ranking = "Hybrid + TF-IDF (Qwen3)" (configs/hybrid_qwen_v1.json, written by scripts/match_ir_eval.py): logistic
 weights on the V3.1 dimensions, Qwen3-Embedding-4B whole-text and title cosines and TF-IDF cosine, fitted on the
-med2425 dev half (test NDCG@10 0.632 vs Qwen3 cosine 0.591, p<0.001; output/match_eval/lab/benchmark.md). The weights
+med2425 dev half (test NDCG@10 0.629 vs Qwen3 cosine 0.591, p<0.001; output/match_eval/lab/benchmark.md). The weights
 come from English synthetic labels; on the Vietnamese CareerViet corpus they are unvalidated until human labels exist.
 
   python -m scripts.ats_service CV.txt --as-of 2026-11-02 [--top 5] [--pool 20] [--jd jd_001 ...] [--rerank]
@@ -37,12 +37,15 @@ GRADES = ("No Fit", "Potential Fit", "Good Fit")
 
 
 def v31_config() -> ScorerConfig:
-    """V3.1 as evaluated (output/match_eval/lab: test-half AUC 0.910, all 59,337 pairs). The near relations are
+    """V3.1 as evaluated (output/match_eval/lab run v32_text_soft: test-half AUC 0.917, all 59,337 pairs). Skills
+    policy text_and_soft: soft skills/languages/Vietnam law listed apart, CV-text mentions count (skills AUC 0.679 -> 0.765,
+    Good pairs with 0% skills 39% -> 21%; ranking unchanged within noise). The near relations are
     auto-built and treated as approved after a 60-item hand audit (~90% precise); grade cut-offs 43 / 58 (dev-fitted
     43.4 / 57.8 for macro-F1)."""
     table = json.loads(RELATIONS.read_text(encoding="utf-8"))
     return ScorerConfig(version="ats-en-v3", review_policy="automatic", title_policy="contained",
                         experience_policy="lower_bound", lower_threshold=43, upper_threshold=58,
+                        skills_policy="text_and_soft",
                         relations=[r | {"review_status": "approved"} for r in table["relations"]],
                         relation_version=table["version"])
 
@@ -113,6 +116,12 @@ def explain(result, grade: int | None = None, fit: float | None = None, why: str
     if d["skills"].supported:
         lines.append(f"Skills {d['skills'].score:.0f}/100. Matched: {', '.join(result.matched_skills[:8]) or 'none'}."
                      + (f" Missing: {', '.join(result.missing_skills[:8])}." if result.missing_skills else ""))
+    breakdown = result.skills_breakdown or {}
+    from_text = [r["candidate_skill"] for r in breakdown.get("requirements", []) if r.get("match_type") == "cv_text"]
+    if from_text:
+        lines.append(f"Found in your CV text (not in the extracted skills list): {', '.join(from_text[:8])}.")
+    if breakdown.get("soft_skills"):
+        lines.append(f"Also asked for, not scored (soft skills, languages, Vietnam-specific law): {', '.join(breakdown['soft_skills'][:8])}.")
     if d["title"].supported:
         lines.append(f"Job title {d['title'].score:.0f}/100: " + ("same role as your CV title or work history." if d["title"].score >= 100
                      else "a related role in your CV title or work history." if d["title"].score > 0
@@ -198,7 +207,8 @@ def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[s
         except Exception as exc:  # one bad JD must not sink the whole answer
             skipped[jd] = f"{type(exc).__name__}: {str(exc)[:200]}"
             continue
-        scored.append((rank, jd, job, score_pair_v3(resume, job, as_of_date=date.fromisoformat(as_of), config=config)))
+        scored.append((rank, jd, job, score_pair_v3(resume, job, as_of_date=date.fromisoformat(as_of), config=config,
+                                                    cv_text=cv_text)))
     if scored:
         ranker = ranker or corpus_ranker()  # TF-IDF weights come from the whole corpus, never just the pool
         cv_title = _latest_title(resume, date.fromisoformat(as_of)) or next(

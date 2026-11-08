@@ -54,10 +54,14 @@ def test_why_names_the_driver_and_good_fit_without_skills_is_flagged():
                "_values": {"text_cos": 0.60, "title_cos": 0.83, "tfidf_cos": 0.23}}
     assert Ranker.why(contrib).startswith("Fit comes mostly from how similar the CV and the job are")
     dim = lambda s, ok=True: SimpleNamespace(supported=ok, score=s, basis="", evidence=[])
+    breakdown = {"requirements": [{"match_type": "cv_text", "candidate_skill": "c#"}, {"match_type": "none"}],
+                 "soft_skills": ["communication", "english"]}
     result = SimpleNamespace(grade=0, overall_score=41.8, matched_skills=[], missing_skills=["sap"],
-                             dimensions={"skills": dim(0), "title": dim(50, False), "experience": dim(50, False),
+                             skills_breakdown=breakdown, dimensions={"skills": dim(0), "title": dim(50, False), "experience": dim(50, False),
                                          "education": dim(50), "industry": dim(100), "location": dim(50, False),
                                          "salary": dim(75, False)})
     lines = explain(result, grade=2, fit=94, why=Ranker.why(contrib))
     assert lines[0].startswith("Good Fit: fit 94/100") and lines[1].startswith("Fit comes") and lines[2].startswith("Caution")
     assert not any(l.startswith("Caution") for l in explain(result, grade=1, fit=60))
+    assert "Found in your CV text (not in the extracted skills list): c#." in lines
+    assert "Also asked for, not scored (soft skills, languages, Vietnam-specific law): communication, english." in lines
