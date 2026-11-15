@@ -18,7 +18,7 @@ from scripts.match_ir_eval import LAB, RUN, paired, per_cv, per_cv_metrics
 from scripts.scorer_lab import split_of
 
 ROOT = Path(__file__).resolve().parent.parent
-VAL_CVS = set(json.loads(Path(r"D:\confit_v2\data_ours\recruiting_data_v2\split_summary.json").read_text())["val_cv_ids"])
+SPLIT = Path(r"D:\confit_v2\data_ours\recruiting_data_v2\split_summary.json")  # ConFit's val CVs, outside the repo
 OUT = LAB / "confit_blend.json"
 WEIGHTS = np.round(np.arange(0, 1.01, 0.05), 2)
 
@@ -39,6 +39,7 @@ def saved_blend(final, confit):
 
 
 def main() -> None:
+    val_cvs = set(json.loads(SPLIT.read_text())["val_cv_ids"])  # read here, not on import: CI has no D: drive
     pairs = m.load_pairs()
     texts = {}
     for p in pairs:
@@ -59,7 +60,7 @@ def main() -> None:
     confit = np.array([cf[k] for k in key])
 
     z = {n: (float(s[is_dev].mean()), float(s[is_dev].std())) for n, s in (("final", final), ("confit", confit))}
-    val = np.isin(cv, list(VAL_CVS))
+    val = np.isin(cv, list(val_cvs))
     curve = {float(w): float(np.mean([v[0] for v in per_cv(cv[val], label[val], blend(final[val], confit[val], z, w)).values()]))
              for w in WEIGHTS}
     w = max(curve, key=curve.get)
