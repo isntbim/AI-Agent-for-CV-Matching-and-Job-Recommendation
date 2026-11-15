@@ -1,0 +1,61 @@
+# Demo stack: Ollama on the GPU (qwen-v4 extractor + qwen3-embedding) and the matching API on :8000.
+#   docker compose -f docker/docker-compose.yml up --build      then open http://localhost:8000
+# Needs the NVIDIA container toolkit (Docker Desktop + WSL2 on Windows) and the models already pulled/created in
+# the host's Ollama folder (OLLAMA_HOME, default %USERPROFILE%/.ollama): qwen-v4 is built by scripts/qwen_build_ollama.py.
+# Corpus, index and the extraction cache stay on the host (output/ is gitignored and holds personal data).
+services:
+  ollama:
+    image: ollama/ollama:0.40.14
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"   # 12 GB GPU: qwen-v4 (6.6 GB) and the embedder (3.1 GB) both stay loaded
+      OLLAMA_KEEP_ALIVE: "30m"
+    volumes:
+      - ${OLLAMA_HOME:-${USERPROFILE}/.ollama}:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      OLLAMA_URL: http://ollama:11434
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../output:/app/output                 # corpus_v2, index_v2, JD texts, extraction cache (written)
+      - ../.cache/retrieval:/app/.cache/retrieval      # bge-m3 weights + query-embedding cache (written)
+      - hf-cache:/app/.cache/hf               # Qwen2.5 tokenizer, downloaded on first start
+    depends_on:
+      - ollama
+
+  # Monitoring: Prometheus scrapes the API's /metrics; Grafana (http://localhost:3001, admin / admin on first login)
+  # opens with the provisioned "CV Match service" dashboard.
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:12.0.0
+    environment:
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/cv-match.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"   # 3000 is the Next.js front end's dev port
+    depends_on:
+      - prometheus
+
+volumes:
+  hf-cache:

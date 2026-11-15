@@ -1,0 +1,7 @@
+# Allowlist: only code and configs go into the image. Never knowledge-base/, data/ or output/ (personal data).
+*
+!src/
+!scripts/
+!configs/
+!docker/requirements-api.txt
+**/__pycache__

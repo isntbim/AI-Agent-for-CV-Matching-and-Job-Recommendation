@@ -137,3 +137,14 @@ data/datasets/qwen_training/
 data/datasets/qwen_training_v4/
 /scratch/
 /graphify-out/
+
+# Runtime / third-party, not project code
+unsloth_compiled_cache/
+.agents/skills/*
+!.agents/skills/o5-explanation/
+!.agents/skills/o5-explanation-vi/
+!.agents/skills/cv-teacher-label/
+!.agents/skills/jd-teacher-label/
+skills-lock.json
+data/datasets/o5_explanation/
+docs/research/ats_scorer/

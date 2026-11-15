@@ -1,0 +1,10 @@
+# Prometheus scrapes the matching API every 15 s (the API's /metrics also reads CPU, RAM and Ollama's VRAM per model).
+# Inside Docker Compose the API is "api:8000"; for Prometheus running on the host, use 127.0.0.1:8000 instead.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: cv-match-api
+    metrics_path: /metrics/
+    static_configs:
+      - targets: ["api:8000"]
