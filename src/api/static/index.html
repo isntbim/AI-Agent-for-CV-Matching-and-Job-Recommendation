@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CV Match</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e6b5c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='sans-serif' font-weight='800' font-size='15' fill='%23fff'%3ECV%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&family=IBM+Plex+Mono:wght@500&display=swap">
 <style>
@@ -20,6 +21,7 @@
   --accent: #4fc0a6; --accent-ink: #0b1211; --soft: #173029;
   --good: #6fd3b8; --pot: #e3b866; --no: #ee9a8c; --good-bg: #173029; --pot-bg: #362b16; --no-bg: #3a221e; color-scheme: dark } }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--display); }
 .wrap { max-width: 1200px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)) 0 max(16px, env(safe-area-inset-right)); }
 header { background: var(--surface); border-bottom: 1px solid var(--line); }
@@ -71,12 +73,33 @@ button.go:disabled { opacity: .6; cursor: progress; }
 .why { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 14px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
 .chips em { font-style: normal; font-weight: 700; color: var(--muted); margin-right: 2px; }
-.chip { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line); }
+.chip { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line); overflow-wrap: anywhere; }
 .chip.have { border-color: var(--good); color: var(--good); }
 .chip.miss { border-color: var(--no); color: var(--no); }
 details summary { cursor: pointer; color: var(--accent); font-size: 14px; }
 details pre { margin: 8px 0 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.55 var(--mono); }
-@media (max-width: 860px) { main .wrap { grid-template-columns: minmax(0, 1fr); } form { position: static; } }
+.live { display: grid; gap: 10px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+.steps li::before { content: "○ "; }
+.steps li[data-state="now"] { color: var(--ink); font-weight: 700; }
+.steps li[data-state="now"]::before { content: "◐ "; color: var(--accent); }
+.steps li[data-state="done"]::before { content: "● "; color: var(--accent); }
+.tail { margin: 0; max-height: 140px; overflow: hidden; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); color: var(--muted); }
+.fb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; }
+.fb button { font: inherit; min-width: 44px; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.fb button[aria-pressed="true"] { border-color: var(--accent); background: var(--soft); }
+.fb select { width: auto; padding: 5px 8px; }
+.hist { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin-top: 16px; }
+.hist h2 { margin: 0 0 8px; font-size: 15px; }
+.hist ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; max-height: 220px; overflow-y: auto; }
+.hist button { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; padding: 6px 4px; border-radius: 6px; font-size: 13px; }
+.hist button:hover, .hist button:focus-visible { background: var(--soft); }
+.hist small { display: block; color: var(--muted); font: 500 11px var(--mono); }
+.side { position: sticky; top: 16px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+.side form { position: static; }
+@media (max-width: 860px) { main .wrap { grid-template-columns: minmax(0, 1fr); } .side { position: static; max-height: none; overflow: visible; } }
+@media (max-width: 400px) { .row { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: no-preference) { .card { animation: rise .25s ease-out both; } @keyframes rise { from { transform: translateY(6px); opacity: .4; } } }
 </style>
 </head>
@@ -88,6 +111,7 @@ details pre { margin: 8px 0 0; max-height: 360px; overflow: auto; white-space: p
 </div></header>
 
 <main><div class="wrap">
+  <div class="side">
   <form id="form">
     <h2>Your CV</h2>
     <label class="drop" id="drop" for="file">Drop a PDF, DOCX or TXT here, or choose a file
@@ -102,6 +126,8 @@ details pre { margin: 8px 0 0; max-height: 360px; overflow: auto; white-space: p
     <button class="go" id="go" type="submit">Find matching jobs</button>
     <p class="note">The first match for a new CV takes about a minute: our fine-tuned model reads the whole CV. The same CV again is instant.</p>
   </form>
+  <section class="hist" aria-labelledby="hist-h"><h2 id="hist-h">Recent matches</h2><ol id="hist"><li class="note">None yet.</li></ol></section>
+  </div>
 
   <section class="results" id="results" aria-live="polite">
     <div class="empty">
@@ -118,21 +144,31 @@ details pre { margin: 8px 0 0; max-height: 360px; overflow: auto; white-space: p
 <script>
 const $ = id => document.getElementById(id);
 const DIMS = ["skills", "title", "experience", "education", "industry", "location", "salary"];
-$("as_of").value = new Date().toISOString().slice(0, 10);
+const now = new Date();
+$("as_of").value = new Date(now - now.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const seeResults = () => { if (innerWidth <= 860) $("results").scrollIntoView({ behavior: "smooth", block: "start" }); };
 
-fetch("/api/health").then(r => r.json()).then(h => {
+fetch("/api/health").then(r => r.ok ? r.json() : Promise.reject()).then(h => {
   $("health").textContent = `${h.jobs} jobs · extractor ${h.extractor}`;
   $("health").dataset.ok = String(h.status === "ok");
 }).catch(() => { $("health").textContent = "service offline"; $("health").dataset.ok = "false"; });
 
-const drop = $("drop");
+const drop = $("drop"), file = $("file"), text = $("text");
 ["dragover", "dragenter"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
-["dragleave", "drop"].forEach(e => drop.addEventListener(e, () => drop.classList.remove("over")));
-drop.addEventListener("drop", ev => { ev.preventDefault(); if (ev.dataTransfer.files.length) $("file").files = ev.dataTransfer.files; });
+drop.addEventListener("dragleave", ev => { if (!drop.contains(ev.relatedTarget)) drop.classList.remove("over"); });
+drop.addEventListener("drop", ev => {
+  ev.preventDefault(); drop.classList.remove("over");
+  if (ev.dataTransfer.files.length) {
+    const dt = new DataTransfer(); dt.items.add(ev.dataTransfer.files[0]);
+    file.files = dt.files; file.dispatchEvent(new Event("change"));
+  }
+});
+file.addEventListener("change", () => { if (file.files.length) text.value = ""; });
+text.addEventListener("input", () => { if (text.value.trim()) file.value = ""; });
 
 function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
 
-function card(m, i) {
+function card(m, i, run, saved) {
   const c = el("article", "card");
   const top = el("div", "top");
   const color = { "Good Fit": "var(--good)", "Potential Fit": "var(--pot)", "No Fit": "var(--no)" }[m.grade];
@@ -146,18 +182,79 @@ function card(m, i) {
   const dims = el("div", "dims");
   const unscored = (m.explanation.at(-1) || "").startsWith("Not scored") ? m.explanation.at(-1) : "";
   DIMS.forEach(d => {
-    const row = el("div", "dim"); if (unscored.includes(d)) row.dataset.unscored = "";
+    const off = unscored.includes(d), row = el("div", "dim");
+    if (off) { row.dataset.unscored = ""; row.title = `Not scored (neutral ${Math.round(m.scores[d])} used)`; }
     const t = el("div", "t"), f = el("div", "f"); f.style.width = `${m.scores[d]}%`; t.append(f);
-    row.append(el("span", "", d), t, el("b", "", Math.round(m.scores[d]))); dims.append(row);
+    row.append(el("span", "", d), t, el("b", "", off ? "—" : Math.round(m.scores[d]))); dims.append(row);
   });
   const why = el("ul", "why"); m.explanation.slice(1).forEach(l => why.append(el("li", "", l)));
   const chips = el("div", "chips");
   if (m.matched_skills.length) { chips.append(el("em", "", "Has")); m.matched_skills.slice(0, 10).forEach(s => chips.append(el("span", "chip have", s))); }
   if (m.missing_skills.length) { chips.append(el("em", "", "Missing")); m.missing_skills.slice(0, 10).forEach(s => chips.append(el("span", "chip miss", s))); }
   const det = el("details"); det.append(el("summary", "", "Read the job posting"), el("pre", "", m.job_text));
-  c.append(top, dims, why); if (chips.children.length) c.append(chips); c.append(det);
+  c.append(top, dims, why); if (chips.children.length) c.append(chips); c.append(det, feedback(m, run, saved));
   return c;
 }
+
+// Thumbs up / down and the user's own verdict, saved per job per run (one vote each; a new one replaces it).
+function feedback(m, run, saved) {
+  const row = el("div", "fb"), note = el("span", "", saved ? "Feedback saved." : "Was this match right?");
+  const up = el("button", "", "👍"), down = el("button", "", "👎"), grade = el("select");
+  up.type = down.type = "button"; up.setAttribute("aria-label", "Good match"); down.setAttribute("aria-label", "Bad match");
+  [["", "Your verdict…"], ["Good Fit"], ["Potential Fit"], ["No Fit"]].forEach(([v, t]) => { const o = el("option", "", t || v); o.value = v; grade.append(o); });
+  grade.setAttribute("aria-label", "Your verdict for this job");
+  let vote = saved?.vote ?? 0; grade.value = saved?.grade || "";
+  const paint = () => { up.setAttribute("aria-pressed", String(vote === 1)); down.setAttribute("aria-pressed", String(vote === -1)); };
+  let queue = Promise.resolve();  // saves go one after another, so the last click is the one stored
+  const send = () => {
+    const body = JSON.stringify({ run_id: run, jd: m.jd, vote, grade: grade.value || null });
+    note.textContent = "Saving…";
+    queue = queue.then(async () => {
+      try {
+        const r = await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+        note.textContent = r.ok ? "Feedback saved." : "Could not save feedback."; if (r.ok) loadHistory();
+      } catch { note.textContent = "Could not save feedback."; }
+    });
+  };
+  up.onclick = () => { vote = 1; if (grade.value && grade.value !== m.grade) grade.value = ""; paint(); send(); };
+  down.onclick = () => { vote = -1; if (grade.value === m.grade) grade.value = ""; paint(); send(); };
+  grade.onchange = () => {
+    if (grade.value) vote = grade.value === m.grade ? 1 : -1;
+    if (vote) { paint(); send(); }  // clearing the verdict is saved too (grade null)
+  };
+  paint(); row.append(note, up, down, grade);
+  return row;
+}
+
+function show(body) {
+  const res = $("results"); res.textContent = "";
+  res.append(el("h2", "", `${body.matches.length} best of ${body.pool} candidate jobs · ${body.seconds} s · run ${body.run_id}`));
+  body.matches.forEach((m, i) => res.append(card(m, i, body.run_id, (body.feedback || {})[m.jd])));
+  if (Object.keys(body.skipped || {}).length) res.append(el("p", "note", `${Object.keys(body.skipped).length} job(s) could not be scored and were left out.`));
+}
+
+async function loadHistory() {
+  try {
+    const runs = await (await fetch("/api/history?limit=8")).json(), list = $("hist");
+    if (!runs.length) return;
+    list.textContent = "";
+    runs.forEach(h => {
+      const b = el("button"), best = h.top[0]; b.type = "button";
+      b.append(el("span", "", best ? `${best.title || best.jd} · ${best.grade}` : "no jobs"),
+               el("small", "", `run ${h.run_id} · ${h.created.replace("T", " ")} · ${h.seconds} s${h.feedback ? ` · ${h.feedback} feedback` : ""}`));
+      b.onclick = async () => {
+        if ($("go").disabled) return;
+        const r = await fetch(`/api/history/${h.run_id}`);
+        if (r.ok) show(await r.json()); else $("results").replaceChildren(el("div", "msg error", "This run could not be loaded."));
+        seeResults();
+      };
+      const li = el("li"); li.append(b); list.append(li);
+    });
+  } catch { /* history is a convenience; matching still works without it */ }
+}
+loadHistory();
+
+const STEPS = { extract: "Reading the CV", retrieve: "Searching 361 jobs", score: "Scoring each job", rank: "Ranking" };
 
 $("form").addEventListener("submit", async ev => {
   ev.preventDefault();
@@ -166,19 +263,40 @@ $("form").addEventListener("submit", async ev => {
   if (!$("file").files.length) fd.delete("file");
   if (!$("text").value.trim()) fd.delete("text");
   go.disabled = true; go.textContent = "Matching…";
-  res.textContent = ""; const wait = el("div", "msg wait", "Reading your CV with the extraction model. This takes about a minute the first time…");
-  res.append(wait);
-  const t0 = Date.now(), tick = setInterval(() => { wait.textContent = `Reading your CV with the extraction model… ${Math.round((Date.now() - t0) / 1000)} s`; }, 1000);
+  // Live view: the pipeline steps, a timer, and the extraction model's output as it is generated.
+  const live = el("div", "msg wait live"), steps = el("ol", "steps"), status = el("span", "", "Starting…"), tail = el("pre", "tail");
+  Object.entries(STEPS).forEach(([k, t]) => { const li = el("li", "", t); li.dataset.step = k; steps.append(li); });
+  steps.firstChild.dataset.state = "now"; tail.hidden = true;
+  live.append(steps, status, tail); res.replaceChildren(live); seeResults();
+  const t0 = Date.now(); let tokens = 0;
+  const tick = setInterval(() => { status.textContent = `${Math.round((Date.now() - t0) / 1000)} s${tokens ? ` · ${tokens} tokens generated` : ""}`; }, 500);
+  const on = {
+    token: d => { tokens = d.tokens; tail.hidden = false; tail.textContent = d.tail; tail.scrollTop = tail.scrollHeight; },
+    step: d => {
+      const li = steps.querySelector(`[data-step="${d.step}"]`); if (li) li.dataset.state = "done";
+      const next = [...steps.children].find(x => !x.dataset.state); if (next) next.dataset.state = "now";
+      tail.hidden = true;
+    },
+    result: d => { show(d); loadHistory(); },
+    error: d => { throw new Error(d.detail); },
+  };
   try {
-    const r = await fetch("/api/match", { method: "POST", body: fd });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.detail || `The server answered ${r.status}.`);
-    res.textContent = "";
-    res.append(el("h2", "", `${body.matches.length} best of ${body.pool} candidate jobs · ${body.seconds} s`));
-    body.matches.forEach((m, i) => res.append(card(m, i)));
-    if (Object.keys(body.skipped || {}).length) res.append(el("p", "note", `${Object.keys(body.skipped).length} job(s) could not be scored and were left out.`));
+    const r = await fetch("/api/match/stream", { method: "POST", body: fd });
+    if (!r.ok) { const body = await r.json().catch(() => ({})); throw new Error(body.detail || `The server answered ${r.status}.`); }
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "", done = false;
+    while (!done) {
+      const chunk = await reader.read(); done = chunk.done;
+      buf += dec.decode(chunk.value || new Uint8Array(), { stream: !done });
+      let cut;
+      while ((cut = buf.indexOf("\n\n")) >= 0) {
+        const lines = buf.slice(0, cut).split("\n"); buf = buf.slice(cut + 2);
+        const kind = lines.find(l => l.startsWith("event: "))?.slice(7), data = lines.find(l => l.startsWith("data: "))?.slice(6);
+        if (kind && data && on[kind]) on[kind](JSON.parse(data));
+      }
+    }
+    if (res.contains(live)) throw new Error("The connection closed before the result arrived. If the match finished, it is in Recent matches.");
   } catch (e) {
-    res.textContent = ""; res.append(el("div", "msg error", e.message));
+    res.replaceChildren(el("div", "msg error", e.message));
   } finally { clearInterval(tick); go.disabled = false; go.textContent = "Find matching jobs"; }
 });
 </script>

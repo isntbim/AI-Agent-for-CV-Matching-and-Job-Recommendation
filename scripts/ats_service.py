@@ -20,6 +20,7 @@ import argparse
 import functools
 import json
 import math
+import re
 from datetime import date
 from pathlib import Path
 
@@ -104,10 +105,20 @@ class Ranker:
         return 0 if logit < lo else 1 if logit < hi else 2
 
 
+VAGUE_WORDS = {"it", "leader", "team", "staff", "member", "employee", "intern", "fresher", "junior", "senior",
+               "lead", "head", "manager", "officer", "executive", "associate", "assistant", "specialist", "worker"}
+
+
+def _r0(x: float) -> int:
+    return math.floor(x + 0.5)  # half-up, matching ScoreResultV3 display_score and browser Math.round
+
+
 def vague_titles(resume) -> list[str]:
     """The CV's job titles when none of them names a known role ("IT", "Leader"): title and experience can't be compared."""
     titles = list(dict.fromkeys(w.position for w in resume.document.work if w.position))
-    return titles if titles and not any(contained_role(t)[1] for t in titles) else []
+    if not titles or any(contained_role(t)[1] for t in titles):
+        return []
+    return titles if all((w := set(re.findall(r"[a-z0-9+#]+", t.casefold()))) and (len(w) == 1 or w <= VAGUE_WORDS) for t in titles) else []
 
 
 def explain(result, grade: int | None = None, fit: float | None = None, why: str | None = None,
@@ -117,44 +128,45 @@ def explain(result, grade: int | None = None, fit: float | None = None, why: str
     A Good Fit whose listed requirements matched no CV skill gets a caution: the verdict then rests on similarity.
     `vague` (from vague_titles) explains why title/experience could not be scored."""
     d = result.dimensions
-    head = (f"{GRADES[grade]}: fit {fit:.0f}/100 (rule score {result.overall_score:.1f}/100)." if grade is not None
+    head = (f"{GRADES[grade]}: fit {_r0(fit)}/100 (rule score {result.overall_score:.1f}/100)." if grade is not None
             else f"{GRADES[result.grade]}: {result.overall_score:.1f}/100.")
     lines = [head] + ([why] if why else [])
     if grade == 2 and d["skills"].supported and d["skills"].score < 10:
         lines.append("Caution: almost none of the job's listed requirements matched your CV's skills exactly. "
                      "Check the Missing list before applying.")
     if d["skills"].supported:
-        lines.append(f"Skills {d['skills'].score:.0f}/100. Matched: {', '.join(result.matched_skills[:8]) or 'none'}."
+        lines.append(f"Skills {_r0(d['skills'].score)}/100. Matched: {', '.join(result.matched_skills[:8]) or 'none'}."
                      + (f" Missing: {', '.join(result.missing_skills[:8])}." if result.missing_skills else ""))
     breakdown = result.skills_breakdown or {}
-    from_text = [r["candidate_skill"] for r in breakdown.get("requirements", []) if r.get("match_type") == "cv_text"]
+    from_text = list(dict.fromkeys(r["candidate_skill"] for r in breakdown.get("requirements", []) if r.get("match_type") == "cv_text"))
     if from_text:
         lines.append(f"Found in your CV text (not in the extracted skills list): {', '.join(from_text[:8])}.")
     if breakdown.get("soft_skills"):
         lines.append(f"Also asked for, not scored (soft skills, languages, Vietnam-specific law): {', '.join(breakdown['soft_skills'][:8])}.")
     if d["title"].supported:
-        lines.append(f"Job title {d['title'].score:.0f}/100: " + ("same role as your CV title or work history." if d["title"].score >= 100
+        lines.append(f"Job title {_r0(d['title'].score)}/100: " + ("same role as your CV title or work history." if d["title"].score >= 100
                      else "a related role in your CV title or work history." if d["title"].score > 0
                      else "no matching role in your CV title or work history."))
     if d["experience"].supported:
         s = d["experience"].score
         lines.append("Experience: no minimum required." if d["experience"].basis == "explicit_no_experience_requirement"
                      else "Experience: meets the required years." if s >= 100
-                     else f"Experience: your relevant work covers about {s:.0f}% of the required years.")
+                     else f"Experience: your relevant work covers about {_r0(s)}% of the required years.")
     if d["education"].supported:
         s = d["education"].score
         lines.append("Education: no degree required." if d["education"].basis == "explicit_no_education_requirement"
                      else "Education: meets the required degree." if s >= 100
                      else "Education: one level below the required degree." if s >= 50 else "Education: below the required degree.")
     if d["industry"].supported:
-        lines.append(f"Industry: your background covers {d['industry'].score:.0f}% of the job's domains.")
+        lines.append(f"Industry: your background covers {_r0(d['industry'].score)}% of the job's domains.")
     for key in ("location", "salary"):
         if d[key].supported:
-            lines.append(f"{key.capitalize()} {d[key].score:.0f}/100.")
+            lines.append(f"{key.capitalize()} {_r0(d[key].score)}/100.")
     unknown = [k for k, v in d.items() if not v.supported]
-    if vague and ({"title", "experience"} & set(unknown)):
-        lines.append(f"Title and experience not scored: your CV's job titles are too general to compare "
-                     f"({', '.join(vague[:4])}). Name the role, e.g. \"IT Manager\" or \".NET Team Leader\".")
+    missed = [k for k in ("title", "experience") if k in unknown]
+    if vague and missed:
+        lines.append(f"{' and '.join(missed).capitalize()} not scored: your CV's job titles are too general to compare "
+                     f"({', '.join(vague[:4])}). Name the role, e.g. \"Backend Developer\" or \"Project Manager\".")
     if unknown:
         lines.append(f"Not scored (evidence missing or inconclusive, neutral value used): {', '.join(unknown)}.")
     return lines
@@ -222,44 +234,105 @@ def corpus_ranker() -> "Ranker":
 
 
 def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[str] | None = None,
-          rerank: bool = False, ranker: "Ranker | None" = None) -> dict:
+          rerank: bool = False, ranker: "Ranker | None" = None, on_step=None, on_token=None) -> dict:
     """The service call: extract the CV, retrieve `pool` JDs, score each with V3.1, return the best `top` explained.
     A JD whose extraction fails is reported in `skipped`, not silently dropped; a JD whose text repeats an earlier
-    one in the pool is left out."""
-    client, config = V4Client(_llm()), v31_config()
-    resume = _cache(as_of, client).get(cv_text, "resume")
-    retrieved = not jd_ids
-    jd_ids = jd_ids or retrieve(resume.document.model_dump(mode="json"), pool, rerank)
-    paths, rows, skipped, scored, seen = _jd_paths(), [], {}, [], set()
-    for rank, jd in enumerate(jd_ids, 1):
-        try:
-            text = (ROOT / paths[jd]).read_text(encoding="utf-8")
-            if text in seen:  # the corpus holds a few postings twice (jd_150 = jd_342): identical text, identical score
+    one in the pool is left out. Runs as the fixed LangGraph flow of service_graph().
+    on_step(node) is called after each graph node; on_token(text) for each token the extractor generates."""
+    llm, answer = _llm() if on_token else None, None
+    if llm:  # shortcut: one hook on the shared client, safe only while matches run one at a time (API LOCK)
+        llm.on_token = on_token
+    try:
+        for update in service_graph().stream({"cv_text": cv_text, "as_of": as_of, "top": top, "pool": pool,
+                                              "jd_ids": jd_ids, "rerank": rerank, "ranker": ranker}, stream_mode="updates"):
+            for node, out in update.items():
+                answer = (out or {}).get("answer", answer)
+                if on_step:
+                    on_step(node)
+    finally:
+        if llm:
+            llm.on_token = None
+    return answer
+
+
+@functools.lru_cache(maxsize=1)
+def service_graph():
+    """extract (V4 + schema check + retry, itself a LangGraph in v4_client) -> retrieve (skipped when the caller
+    names the JDs) -> score (extract each JD, V3.1) -> rank (final ranking model + explanations)."""
+    from typing import Any, TypedDict
+
+    from langgraph.graph import END, StateGraph
+
+    class S(TypedDict, total=False):
+        cv_text: str
+        as_of: str
+        top: int
+        pool: int
+        jd_ids: Any
+        rerank: bool
+        ranker: Any
+        client: Any
+        resume: Any
+        retrieved: bool
+        scored: list
+        skipped: dict
+        answer: dict
+
+    def extract(s: S) -> S:
+        client = V4Client(_llm())
+        return {"client": client, "resume": _cache(s["as_of"], client).get(s["cv_text"], "resume")}
+
+    def find(s: S) -> S:
+        return {"retrieved": True,
+                "jd_ids": retrieve(s["resume"].document.model_dump(mode="json"), s["pool"], s["rerank"])}
+
+    def score(s: S) -> S:
+        config, paths, skipped, scored, seen = v31_config(), _jd_paths(), {}, [], set()
+        for rank, jd in enumerate(s["jd_ids"], 1):
+            try:
+                text = (ROOT / paths[jd]).read_text(encoding="utf-8")
+                if text in seen:  # the corpus holds a few postings twice (jd_150 = jd_342): identical text, identical score
+                    continue
+                seen.add(text)
+                job = _cache(client=s["client"]).get(text, "job")
+            except Exception as exc:  # one bad JD must not sink the whole answer
+                skipped[jd] = f"{type(exc).__name__}: {str(exc)[:200]}"
                 continue
-            seen.add(text)
-            job = _cache(client=client).get(text, "job")
-        except Exception as exc:  # one bad JD must not sink the whole answer
-            skipped[jd] = f"{type(exc).__name__}: {str(exc)[:200]}"
-            continue
-        scored.append((rank, jd, job, score_pair_v3(resume, job, as_of_date=date.fromisoformat(as_of), config=config,
-                                                    cv_text=cv_text)))
-    if scored:
-        ranker = ranker or corpus_ranker()  # TF-IDF weights come from the whole corpus, never just the pool
-        cv_title = _latest_title(resume, date.fromisoformat(as_of)) or next(
-            (w.position for w in resume.document.work if w.position), None)
-        logits = ranker.scores(cv_text, cv_title, [(jd, job.document.title, r.unrounded_scores.model_dump())
-                                                   for _, jd, job, r in scored])
-        for (rank, jd, job, result), logit, contrib in zip(scored, logits, ranker.last_features):
-            grade, fit = ranker.grade(logit), 100 / (1 + math.exp(-logit))
-            rows.append({"jd": jd, "title": job.document.title, "retrieval_rank": rank, "fit": round(fit, 1),
-                         "_logit": logit, "grade": GRADES[grade], "rule_score": result.overall_score,
-                         "scores": result.scores.model_dump(), "matched_skills": result.matched_skills,
-                         "missing_skills": result.missing_skills,
-                         "explanation": explain(result, grade, fit, Ranker.why(contrib), vague_titles(resume)),
-                         "evidence": {k: v.evidence[:3] for k, v in result.dimensions.items() if v.supported and v.evidence}})
-    rows.sort(key=lambda r: (-r.pop("_logit"), r["retrieval_rank"]))
-    return {"as_of": as_of, "retrieved": retrieved, "pool": len(jd_ids), "matches": rows[:top], "skipped": skipped,
-            "ranking_model": "hybrid_qwen_v1"}
+            scored.append((rank, jd, job, score_pair_v3(s["resume"], job, as_of_date=date.fromisoformat(s["as_of"]),
+                                                        config=config, cv_text=s["cv_text"])))
+        return {"scored": scored, "skipped": skipped}
+
+    def rank(s: S) -> S:
+        rows, scored, resume = [], s["scored"], s["resume"]
+        if scored:
+            ranker = s.get("ranker") or corpus_ranker()  # TF-IDF weights come from the whole corpus, never just the pool
+            cv_title = _latest_title(resume, date.fromisoformat(s["as_of"])) or next(
+                (w.position for w in resume.document.work if w.position), None)
+            logits = ranker.scores(s["cv_text"], cv_title, [(jd, job.document.title, r.unrounded_scores.model_dump())
+                                                            for _, jd, job, r in scored])
+            for (rnk, jd, job, result), logit, contrib in zip(scored, logits, ranker.last_features):
+                grade, fit = ranker.grade(logit), 100 / (1 + math.exp(-logit))
+                rows.append({"jd": jd, "title": job.document.title, "retrieval_rank": rnk, "fit": round(fit, 1),
+                             "_logit": logit, "grade": GRADES[grade], "rule_score": result.overall_score,
+                             "scores": result.scores.model_dump(), "matched_skills": result.matched_skills,
+                             "missing_skills": result.missing_skills,
+                             "explanation": explain(result, grade, round(fit, 1), Ranker.why(contrib), vague_titles(resume)),
+                             "evidence": {k: v.evidence[:3] for k, v in result.dimensions.items()
+                                          if v.supported and v.evidence}})
+        rows.sort(key=lambda r: (-r.pop("_logit"), r["retrieval_rank"]))
+        return {"answer": {"as_of": s["as_of"], "retrieved": bool(s.get("retrieved")), "pool": len(s["jd_ids"]),
+                           "matches": rows[:s["top"]], "skipped": s["skipped"], "ranking_model": "hybrid_qwen_v1"}}
+
+    g = StateGraph(S)
+    for name, fn in (("extract", extract), ("retrieve", find), ("score", score), ("rank", rank)):
+        g.add_node(name, fn)
+    g.set_entry_point("extract")
+    g.add_conditional_edges("extract", lambda s: "score" if s.get("jd_ids") else "retrieve",
+                            {"retrieve": "retrieve", "score": "score"})
+    g.add_edge("retrieve", "score")
+    g.add_edge("score", "rank")
+    g.add_edge("rank", END)
+    return g.compile()
 
 
 def prepare_jds(workers: int = 1) -> None:

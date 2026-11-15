@@ -5,6 +5,7 @@ valid? done : retry at the next repetition penalty. It is an LLMClient, so Extra
 use it unchanged and still run the production validation on the repaired JSON.
 """
 
+import os
 import json
 from typing import TypedDict
 
@@ -39,8 +40,11 @@ class QwenV4:
     and sent raw, as in the vLLM evaluation; greedy, no schema-constrained decoding. Ollama's repeat_penalty over the
     whole context (repeat_last_n = num_ctx) matches vLLM/HF repetition_penalty, which also covers the prompt tokens."""
 
+    on_token = None  # optional callback(str) per streamed token
+
     # 127.0.0.1, not localhost: on Windows localhost tries IPv6 first, ~2 s per new connection
-    def __init__(self, model: str = "qwen-v4", url: str = "http://127.0.0.1:11434", timeout: float = 1800):
+    def __init__(self, model: str = "qwen-v4", url: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"),
+                 timeout: float = 1800):
         from transformers import AutoTokenizer
 
         self.tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
@@ -69,6 +73,8 @@ class QwenV4:
                         done, streamed = chunk.get("done_reason") or "stop", chunk.get("eval_count", streamed)
                         break
                     text += chunk.get("response", "")
+                    if self.on_token:  # live view for the web page; never changes the output
+                        self.on_token(chunk.get("response", ""))
                     streamed += 1  # one token per streamed message; the final eval_count overrides
                     if streamed % 64 == 0 and (cut := loop_cut(text)) is not None:  # O(n) scan every 64 tokens
                         break

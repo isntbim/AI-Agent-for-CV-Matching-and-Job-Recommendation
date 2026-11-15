@@ -68,6 +68,10 @@ def test_why_names_the_driver_and_good_fit_without_skills_is_flagged():
     assert not any(l.startswith("Title and experience not scored") for l in lines)
     assert any(l.startswith("Title and experience not scored: your CV's job titles are too general to compare (IT, Leader)")
                for l in explain(result, vague=["IT", "Leader"]))
+    result.dimensions["experience"] = dim(100, True)
+    assert any(l.startswith("Title not scored: your CV's job titles are too general") for l in explain(result, vague=["IT"]))
+    result.dimensions["skills"] = dim(54.5, True)
+    assert any(l.startswith("Skills 55/100.") for l in explain(result))
 
 
 def test_vague_titles_only_when_no_title_names_a_role():
@@ -76,6 +80,7 @@ def test_vague_titles_only_when_no_title_names_a_role():
     cv = lambda *ps: SimpleNamespace(document=SimpleNamespace(work=[SimpleNamespace(position=p) for p in ps]))
     assert vague_titles(cv("IT", "Leader", "Leader", None)) == ["IT", "Leader"]
     assert vague_titles(cv("IT", "Staff Accountant")) == []
+    assert vague_titles(cv("Backend JAVA developer", "Full stack JAVA developer")) == []
     assert vague_titles(cv()) == []
 
 

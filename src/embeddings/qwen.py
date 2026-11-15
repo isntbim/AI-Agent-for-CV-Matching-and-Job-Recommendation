@@ -1,5 +1,6 @@
 """Qwen3-Embedding-4B through Ollama: the ranking model's text and title embeddings (benchmark and service share it).
 Context 2,048 tokens, longer text cut: the same budget as bge-m3, and 8,192 scored the same (NDCG@10 0.590 vs 0.591)."""
+import os
 import numpy as np
 import requests
 
@@ -10,7 +11,7 @@ INSTRUCT = "Instruct: Given a candidate's resume, retrieve job descriptions that
 
 class QwenEmbedder:
     # 127.0.0.1, not localhost: on Windows localhost tries IPv6 first, ~2 s per new connection
-    def __init__(self, url: str = "http://127.0.0.1:11434", timeout: float = 600):
+    def __init__(self, url: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"), timeout: float = 600):
         self.url, self.timeout = url, timeout
 
     def encode(self, texts: list[str], query: bool = False, batch: int = 8) -> np.ndarray:
