@@ -138,7 +138,17 @@ def test_mock_and_oversized_inputs_rejected():
     with pytest.raises(ExtractionError, match="real"):
         extract_document("text", "resume", MockLLMClient())
     with pytest.raises(ExtractionError, match="truncation"):
-        extract_document("x" * 10, "resume", EnvelopeClient(), max_chars=5)
+        extract_document("x" * 10, "job", EnvelopeClient(), max_chars=5)
+
+
+def test_long_cv_is_read_in_pieces_and_merged():
+    text = ("software engineer Python at Acme.\n" * 15 + "\n") * 8  # about 4,300 characters
+    client = EnvelopeClient()
+    resume = extract_document(text, "resume", client, max_chars=1000)
+    assert len(client.calls) > 2  # read in pieces of at most 500 characters
+    assert all(len(json.loads(u)["source_text"]) <= 500 for _, u in client.calls)
+    assert len(resume.document.work) == 1  # the same job seen in every piece is kept once
+    assert resume.facts.completed_degrees == ["bachelor"]
 
 
 def test_layout_whitespace_restores_original_quote_but_paraphrases_fail():
@@ -207,3 +217,12 @@ def test_cli_cached_pipeline_and_identity_guards(tmp_path, capsys):
         main(["score", "--split", "test", "--calibration", str(calibration), *changed])
     with pytest.raises(SystemExit):
         main(["score", "--split", "test", *common])
+
+
+def test_merge_skips_fields_a_piece_left_empty():
+    from src.scoring.extraction import _merge
+    merged = _merge([{"basics": {"label": None, "location": None}, "work": [{"position": "A"}]},
+                     {"basics": {"label": "Data Scientist", "location": {"city": "Hanoi"}}, "work": None},
+                     {"basics": None, "work": [{"position": "A"}, {"position": "B"}]}])
+    assert merged == {"basics": {"label": "Data Scientist", "location": {"city": "Hanoi"}},
+                      "work": [{"position": "A"}, {"position": "B"}]}

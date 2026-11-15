@@ -132,6 +132,7 @@ def paired(cv, label, a, b, reps=2000) -> dict:
 
 FINAL = "Final: Hybrid + TF-IDF (Qwen3)"
 NO_RULES = "Qwen3 + TF-IDF + title (no rules)"
+CONFIT = "ConFit v2 (paper baseline, e5-base, no HyRE)"
 
 
 def main() -> None:
@@ -171,6 +172,10 @@ def main() -> None:
     Xb, _, _, _ = load_dims(RUN, "test", ["text_cos", "title_cos"])
     lr = LogisticRegression(max_iter=5000).fit(Xa, ya >= 1)
     scores["Hybrid (V3.1 + BGE-M3 text/title)"] = np.concatenate([lr.decision_function(Xa), lr.decision_function(Xb)])
+    confit_file = LAB / "confit_v2_cosine.jsonl"  # paper baseline: ConFit v2 trained on the dev half (scripts/confit_score.py)
+    if confit_file.exists():
+        cf = {(r["cv"], r["jd"]): r["cos"] for r in map(json.loads, confit_file.open(encoding="utf-8"))}
+        scores[CONFIT] = np.array([cf[k] for k in key])
     rerank_file = LAB / "reranker_scores.jsonl"  # scripts/reranker_baseline.py
     if rerank_file.exists():
         ce = {(r["cv"], r["jd"]): r["score"] for r in map(json.loads, rerank_file.open(encoding="utf-8"))}
@@ -217,6 +222,8 @@ def main() -> None:
                         (FINAL, "TF-IDF + cosine")]
     if "Cross-encoder (BGE reranker)" in scores:
         comparisons += [("Cross-encoder (BGE reranker)", "TF-IDF + cosine"), (hybrid, "Cross-encoder (BGE reranker)")]
+    if CONFIT in scores:
+        comparisons += [(FINAL, CONFIT), (CONFIT, "TF-IDF + cosine"), (CONFIT, "BM25")]
     significance = {f"{a} vs {b}": paired(cv[test], label[test], scores[a][test], scores[b][test]) for a, b in comparisons}
     majority = float((label[test] == 0).mean())
     meta = {"test_pairs": int(test.sum()), "test_cvs": int(len(set(cv[test]))), "always_no_fit_accuracy": round(majority, 4),

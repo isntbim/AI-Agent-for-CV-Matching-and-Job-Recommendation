@@ -1,7 +1,10 @@
 """Check that the EDA distinguishes score errors, rank agreement and class balance."""
 
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip("pandas")
+pytest.importorskip("matplotlib")
+pytest.importorskip("plotly")
 
 from scripts.ats_silver_eda import correlation, metrics
 

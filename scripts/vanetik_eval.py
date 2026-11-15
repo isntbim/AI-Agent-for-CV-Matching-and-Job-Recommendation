@@ -104,6 +104,27 @@ def method_scores() -> dict[str, np.ndarray]:
     dims = np.array([[[x.unrounded_scores.model_dump()[d] / 100 for d in DIMS] for x in row] for row in v31])
     s["Hybrid (V3.1 + BGE-M3 text/title)"] = (dims @ np.array([w[d] for d in DIMS]) + w["text_cos"] * s["BGE-M3 cosine"]
                                               + w["title_cos"] * title_cos)
+    # the final service ranker (configs/hybrid_qwen_v1.json), weights unchanged; TF-IDF fitted on these 35 texts
+    from scripts.ats_service import HYBRID
+    from src.embeddings.qwen import QwenEmbedder
+
+    emb, final = QwenEmbedder(), json.loads(HYBRID.read_text(encoding="utf-8"))
+    s["Qwen3-Embedding-4B cosine"] = emb.encode(cvs, query=True) @ emb.encode(vac).T
+    q_title = emb.encode(titles_cv) @ emb.encode(titles_jd).T
+    fw = dict(zip(final["features"], final["coefficients"]))
+    s["Final ranker: Hybrid + TF-IDF (Qwen3)"] = (final["intercept"] + dims @ np.array([fw[d] for d in DIMS])
+                                                  + fw["text_cos"] * s["Qwen3-Embedding-4B cosine"]
+                                                  + fw["title_cos"] * q_title + fw["tfidf_cos"] * s["TF-IDF + cosine"])
+    from scripts.human_label_eval import CONFIT, confit_vectors
+
+    vec = confit_vectors({str(i): t for i, t in enumerate(cvs)}, {str(i): t for i, t in enumerate(vac)}, "vanetik")
+    if vec:
+        s[CONFIT] = np.array([[float(vec["cv"][str(i)] @ vec["jd"][str(k)]) for k in range(5)] for i in range(30)])
+        from scripts.confit_blend import BLEND, saved_blend
+
+        b = saved_blend(s["Final ranker: Hybrid + TF-IDF (Qwen3)"], s[CONFIT])
+        if b is not None:
+            s[BLEND] = b
     return s
 
 

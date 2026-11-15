@@ -130,7 +130,8 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_]+", args.teacher):
         sys.exit("teacher must be a folder name like haiku_b")
-    manifest = {r["id"]: r for name in ("manifest.json", "manifest_external.json", "manifest_goldcal.json") if (OUT / name).exists()
+    manifest = {r["id"]: r for name in ("manifest.json", "manifest_external.json", "manifest_goldcal.json", "holdout/manifest.json")
+                if (OUT / name).exists()
                 for r in json.loads((OUT / name).read_text(encoding="utf-8"))["documents"]}
     failed = False
     for cv_id in args.ids:

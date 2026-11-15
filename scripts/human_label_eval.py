@@ -56,6 +56,25 @@ def ranking_metrics(score: np.ndarray, gain: np.ndarray) -> dict:
             "Kendall": float(kendalltau(score, gain).statistic) if len(set(gain)) > 1 else np.nan}
 
 
+CONFIT = "ConFit v2 (paper baseline, trained on med2425)"
+CONFIT_PY, CONFIT_CKPT = Path(r"D:\confit_v2\.venv\Scripts\python.exe"), Path(r"D:\confit_v2\checkpoints\e5base_full")
+
+
+def confit_vectors(cv_text: dict, jd_text: dict, name: str) -> dict | None:
+    """ConFit v2 embeddings via its own venv (scripts/confit_score.py --texts); None when it is not installed."""
+    import subprocess
+
+    if not (CONFIT_PY.exists() and CONFIT_CKPT.exists()):
+        return None
+    tmp = ROOT / f"output/match_eval/lab/confit_{name}"
+    (tmp.with_suffix(".texts.json")).write_text(json.dumps({"cv": cv_text, "jd": jd_text}, ensure_ascii=False), encoding="utf-8")
+    subprocess.run([str(CONFIT_PY), str(ROOT / "scripts/confit_score.py"), "--checkpoint", str(CONFIT_CKPT),
+                    "--texts", str(tmp.with_suffix(".texts.json")), "--out", str(tmp.with_suffix(".vectors.json")),
+                    "--device", "cpu", "--batch-size", "8"], check=True, cwd=ROOT)  # small sets: CPU leaves the GPU to Ollama
+    out = json.loads(tmp.with_suffix(".vectors.json").read_text(encoding="utf-8"))
+    return {k: {i: np.array(v) for i, v in out[k].items()} for k in ("cv", "jd")}
+
+
 def method_scores(pairs: list[tuple[str, str]]) -> dict[str, dict]:
     """{method: {(cv, jd): score}} for every labelled pair, computed the same way as the benchmark and service."""
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -107,6 +126,15 @@ def method_scores(pairs: list[tuple[str, str]]) -> dict[str, dict]:
             out["Hybrid (V3.1 + BGE-M3)"][(c, j)] = (sum(w[d] * dims[d] / 100 for d in ("skills", "title", "experience", "education", "industry"))
                                                      + w["text_cos"] * text_cos + w["title_cos"] * title_cos)
             out[SERVICE][(c, j)] = service[k]
+    used_jds = sorted({j for _, j in pairs})
+    vec = confit_vectors({c: cv_text[c] for c in by_cv}, {j: jd_text[j] for j in used_jds}, "human_labels")
+    if vec:
+        out[CONFIT] = {(c, j): float(vec["cv"][c] @ vec["jd"][j]) for c, j in pairs}
+        from scripts.confit_blend import BLEND, saved_blend
+
+        b = saved_blend([out[SERVICE][k] for k in pairs], [out[CONFIT][k] for k in pairs])
+        if b is not None:
+            out[BLEND] = dict(zip(pairs, map(float, b)))
     return out
 
 
@@ -122,15 +150,19 @@ def evaluate(consensus: dict, scores: dict, reps: int = 2000) -> tuple[dict, dic
             per[m].append(ranking_metrics(np.array([s[(c, j)] for j in jds]), gain))
     table = {m: {k: round(float(np.nanmean([r[k] for r in rs])), 4) for k in rs[0]} | {"cvs": len(rs)}
              for m, rs in per.items() if rs}
-    a, b = SERVICE, "TF-IDF + cosine"
-    diff = np.array([ra["NDCG@5"] - rb["NDCG@5"] for ra, rb in zip(per[a], per[b])])
-    rng = np.random.default_rng(7)
-    boot = [diff[rng.integers(0, len(diff), len(diff))].mean() for _ in range(reps)]
-    flips = [(diff * rng.choice((-1, 1), len(diff))).mean() for _ in range(reps)]
-    test = {"comparison": f"{a} vs {b}", "NDCG@5_diff": round(float(diff.mean()), 4),
-            "ci95": np.percentile(boot, [2.5, 97.5]).round(4).tolist(),
-            "p": round(float((np.sum(np.abs(flips) >= abs(diff.mean())) + 1) / (reps + 1)), 4), "cvs": len(diff)}
-    return table, test
+    tests = []
+    from scripts.confit_blend import BLEND
+
+    extra = [(a, b) for a, b in ((SERVICE, CONFIT), (BLEND, SERVICE), (BLEND, CONFIT)) if a in per and b in per]
+    for a, b in [(SERVICE, "TF-IDF + cosine")] + extra:
+        diff = np.array([ra["NDCG@5"] - rb["NDCG@5"] for ra, rb in zip(per[a], per[b])])
+        rng = np.random.default_rng(7)
+        boot = [diff[rng.integers(0, len(diff), len(diff))].mean() for _ in range(reps)]
+        flips = [(diff * rng.choice((-1, 1), len(diff))).mean() for _ in range(reps)]
+        tests.append({"comparison": f"{a} vs {b}", "NDCG@5_diff": round(float(diff.mean()), 4),
+                      "ci95": np.percentile(boot, [2.5, 97.5]).round(4).tolist(),
+                      "p": round(float((np.sum(np.abs(flips) >= abs(diff.mean())) + 1) / (reps + 1)), 4), "cvs": len(diff)})
+    return table, tests
 
 
 def main() -> None:
@@ -145,7 +177,7 @@ def main() -> None:
              "| Method | NDCG@5 | P@3 | MRR | Kendall | CVs |", "|---|---|---|---|---|---|"]
     lines += [f"| {m} | {r['NDCG@5']:.3f} | {r['P@3']:.3f} | {r['MRR']:.3f} | {r['Kendall']:.3f} | {r['cvs']} |"
               for m, r in table.items()]
-    lines += ["", f"{test['comparison']}: NDCG@5 {test['NDCG@5_diff']:+.3f} {test['ci95']}, p={test['p']} ({test['cvs']} CVs)"]
+    lines += [""] + [f"{x['comparison']}: NDCG@5 {x['NDCG@5_diff']:+.3f} {x['ci95']}, p={x['p']} ({x['cvs']} CVs)" for x in test]
     (OUT / "human_label_eval.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 

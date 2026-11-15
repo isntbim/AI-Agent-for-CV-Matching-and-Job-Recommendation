@@ -274,10 +274,6 @@ def _create_completion(client, messages, use_json_mode):
         kwargs["response_format"] = {"type": "json_object"}
     return client.chat.completions.create(**kwargs)
 
-    content = resp.choices[0].message.content
-    data = _parse_llm_json(content)
-    return LLMJudgeResponse.model_validate(data)
-
 
 def _parse_llm_json(content):
     """Parse LLM JSON output, tolerating markdown fences or trailing prose."""

@@ -1,7 +1,12 @@
 import json
 
+import pytest
+
 from scripts.qwen_eval import DATA
 from scripts.qwen_failure_analysis import analyse
+
+# the gold test split holds CV text, so it is git-ignored: these tests run where the data is (not in CI)
+pytestmark = pytest.mark.skipif(not (DATA / "cv_extraction/test.jsonl").exists(), reason="gold test split not present")
 
 
 def first_row() -> dict:

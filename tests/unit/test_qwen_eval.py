@@ -1,6 +1,11 @@
 import json
 
-from scripts.qwen_eval import parse, prf, quotes, score, skills
+import pytest
+
+from scripts.qwen_eval import DATA, parse, prf, quotes, score, skills
+
+# the gold test split holds CV text, so it is git-ignored: these tests run where the data is (not in CI)
+needs_gold = pytest.mark.skipif(not (DATA / "cv_extraction/test.jsonl").exists(), reason="gold test split not present")
 
 
 def test_parse_strips_fences_and_rejects_non_objects():
@@ -17,6 +22,7 @@ def test_skills_and_quotes_shapes():
     assert quotes({"facts": {"evidence": {"skills": [{"quote": "a"}, {"quote": "b"}]}}}) == ["a", "b"]
 
 
+@needs_gold
 def test_wrong_typed_parts_count_as_empty():
     assert skills({"document": "a string"}, "cv_extraction") == set()
     assert skills({"document": {"skills": ["Excel", {"details": "x"}]}}, "cv_extraction") == set()
@@ -43,6 +49,7 @@ def test_prf_handles_empty():
     assert prf(1, 2, 1)["f1"] == 0.667
 
 
+@needs_gold
 def test_gold_prediction_scores_perfectly():
     line = (__import__("scripts.qwen_eval", fromlist=["DATA"]).DATA / "cv_extraction/test.jsonl").read_text(encoding="utf-8").splitlines()[0]
     row = json.loads(line)
@@ -52,6 +59,7 @@ def test_gold_prediction_scores_perfectly():
         assert r[key] == {"value": 1.0, "ci95": [1.0, 1.0]}, key
 
 
+@needs_gold
 def test_unparseable_prediction_scores_zero():
     line = (__import__("scripts.qwen_eval", fromlist=["DATA"]).DATA / "cv_extraction/test.jsonl").read_text(encoding="utf-8").splitlines()[0]
     row = json.loads(line)

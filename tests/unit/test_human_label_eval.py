@@ -20,7 +20,7 @@ def test_evaluate_prefers_the_method_that_matches_humans():
     consensus = {(f"c{i}", f"j{k}"): float(k % 3) for i in range(12) for k in range(6)}
     good = {key: v for key, v in consensus.items()}
     bad = {key: -v for key, v in consensus.items()}
-    table, test = evaluate(consensus, {"Final: Hybrid + TF-IDF (Qwen3, service)": good, "TF-IDF + cosine": bad}, reps=200)
+    table, (test,) = evaluate(consensus, {"Final: Hybrid + TF-IDF (Qwen3, service)": good, "TF-IDF + cosine": bad}, reps=200)
     assert table["Final: Hybrid + TF-IDF (Qwen3, service)"]["NDCG@5"] == 1.0 and test["NDCG@5_diff"] > 0 and test["p"] < 0.05
 
 

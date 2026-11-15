@@ -116,6 +116,8 @@ def test_legacy_share_retains_historical_70_20_10_numbers(depth):
 @pytest.mark.parametrize("version", ["ats-en-v1", "ats-en-v2"])
 def test_v1_v2_config_bytes_match_preserved_pre_change_code(version):
     reference = Path(__file__).resolve().parents[2] / "output/scorer_v3/preferred_policy_2026-10-11/reference_code"
+    if not reference.exists():  # frozen pre-change code lives in git-ignored output/
+        pytest.skip("pre-change reference code not present")
     script = "from src.scoring.models import ScorerConfig; print(ScorerConfig(version='" + version + "').model_dump_json())"
     old = subprocess.run([sys.executable, "-X", "utf8", "-c", script], cwd=reference,
                          check=True, capture_output=True, text=True).stdout.strip()
