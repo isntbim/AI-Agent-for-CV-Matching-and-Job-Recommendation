@@ -1,4 +1,8 @@
-"""Web service contract, with the models stubbed out (no Ollama, no bge-m3)."""
+"""Web service contract, with the models stubbed out (no Ollama, no bge-m3). Every test runs on the SQLite history and,
+when PG_TEST_DSN points at a PostgreSQL server (as in CI), again on a fresh PostgreSQL history database."""
+import os
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,10 +11,28 @@ from scripts import ats_service as svc
 CV = "Software engineer with five years of Python, Django and PostgreSQL experience building web services. " * 4
 
 
-@pytest.fixture
-def client(monkeypatch, tmp_path):
-    calls = []
+@pytest.fixture(params=["sqlite", "postgres"])
+def history(request, monkeypatch, tmp_path):
+    monkeypatch.delenv("HISTORY_DSN", raising=False)
     monkeypatch.setenv("HISTORY_DB", str(tmp_path / "history.sqlite"))
+    if request.param == "sqlite":
+        yield
+        return
+    base = os.environ.get("PG_TEST_DSN") or pytest.skip("PG_TEST_DSN not set: PostgreSQL history not tested")
+    import psycopg
+    from psycopg.conninfo import make_conninfo
+    name = f"history_test_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(base, autocommit=True) as admin:
+        admin.execute(f"CREATE DATABASE {name}")
+    monkeypatch.setenv("HISTORY_DSN", make_conninfo(base, dbname=name))
+    yield
+    with psycopg.connect(base, autocommit=True) as admin:
+        admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path, history):
+    calls = []
     (tmp_path / "jd_001.txt").write_text("Backend Developer. Python, Django, PostgreSQL.", encoding="utf-8")
     monkeypatch.setattr(svc, "ROOT", tmp_path)
     monkeypatch.setattr(svc, "corpus_ranker", lambda: "RANKER")

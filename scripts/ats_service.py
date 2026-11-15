@@ -18,8 +18,10 @@ embeddings 3.1 GB); with 3 slots qwen-v4 takes 10 GB and Ollama swaps the two mo
 
 import argparse
 import functools
+import hashlib
 import json
 import math
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -186,9 +188,20 @@ def _retrieval_index():
     docs, _, vectors, _, _, im = load_index(args)
     cache = ROOT / ".cache/retrieval"
     embedder = BGEEmbedder(revision=im["revision"], device="cpu", batch_size=1, cache_folder=str(cache / "huggingface"))
-    store = InMemoryVectorStore(dimension=im["dimension"])
-    store.create_table("service")
-    store.upsert_batch([d["id"] for d in docs], list(vectors), docs)
+    ids = [d["id"] for d in docs]
+    if dsn := os.environ.get("VECTOR_DSN"):  # the Docker stack's pgvector database
+        from src.vector_db.pgvector_store import PGVectorStore
+
+        # one table per corpus + embedding model, so a rebuilt corpus never reads stale vectors
+        key = hashlib.sha256(json.dumps([ids, im["model"], im["revision"]]).encode()).hexdigest()[:12]
+        store = PGVectorStore(dsn, table_name=f"jd_vectors_{key}", vector_size=im["dimension"])
+        store.create_table()
+        if store.count() != len(ids):  # first start on this corpus: load its vectors once
+            store.upsert_batch(ids, list(vectors), docs)
+    else:
+        store = InMemoryVectorStore(dimension=im["dimension"])
+        store.create_table("service")
+        store.upsert_batch(ids, list(vectors), docs)
     return docs, store, embedder, EmbeddingCache(cache / "embeddings", im["model"], im["revision"])
 
 

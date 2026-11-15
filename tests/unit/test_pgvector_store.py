@@ -454,3 +454,29 @@ class TestPGVectorStoreSQL:
         assert "%(threshold)s" not in sql_no_threshold, (
             "Threshold parameter found in non-threshold search SQL."
         )
+
+
+def test_postgres_search_matches_in_memory_top_50():
+    """The service's retrieval asks for 50 hits: pgvector (HNSW) must return the same ranking as the exact in-memory
+    store on a corpus of the service's size. Runs when PG_TEST_DSN points at PostgreSQL with pgvector (as in CI)."""
+    import os
+
+    dsn = os.environ.get("PG_TEST_DSN") or pytest.skip("PG_TEST_DSN not set: pgvector not tested")
+    rng = np.random.default_rng(0)
+    vectors = [v / np.linalg.norm(v) for v in rng.normal(size=(361, 1024))]
+    ids = [f"jd_{i:03d}" for i in range(len(vectors))]
+    payloads = [{"id": i} for i in ids]
+    memory = InMemoryVectorStore(dimension=1024)
+    memory.create_table("parity")
+    memory.upsert_batch(ids, vectors, payloads)
+    pg = PGVectorStore(dsn, table_name=f"parity_{uuid.uuid4().hex[:8]}", vector_size=1024)
+    pg.create_table()
+    try:
+        pg.upsert_batch(ids, vectors, payloads)
+        assert pg.count() == 361
+        for q in rng.normal(size=(10, 1024)):
+            exact, approx = memory.search(q, top_k=50), pg.search(q, top_k=50)
+            assert [r.id for r in approx] == [r.id for r in exact]
+            assert [r.score for r in approx] == pytest.approx([r.score for r in exact], abs=1e-5)
+    finally:
+        pg.drop_table()

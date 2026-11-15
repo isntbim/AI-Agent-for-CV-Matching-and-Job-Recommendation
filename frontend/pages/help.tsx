@@ -66,7 +66,7 @@ const FAQS = [
     question:
       'What do “Matching unavailable · saved runs ok” or “API offline” in the header mean?',
     answer:
-      '“361 jobs · Qwen up” means both FastAPI and Ollama are ready for live CV matching. “Matching unavailable · saved runs ok” means FastAPI is reachable on port 8000 while Ollama is stopped: new and cached CVs cannot rank because Ranker.scores() requests fresh Qwen3-Embedding-4B vectors on every match, while previously saved runs in Recent runs remain available from SQLite. “API offline” means the FastAPI server at 127.0.0.1:8000 is not running.',
+      '“361 jobs · Qwen up” means both FastAPI and Ollama are ready for live CV matching. “Matching unavailable · saved runs ok” means FastAPI is reachable on port 8000 while Ollama is stopped: new and cached CVs cannot rank because Ranker.scores() requests fresh Qwen3-Embedding-4B vectors on every match, while previously saved runs in Recent runs remain available from the history database. “API offline” means the FastAPI server is not running.',
   },
 ];
 

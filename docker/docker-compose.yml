@@ -1,16 +1,61 @@
-# Demo stack: Ollama on the GPU (qwen-v4 extractor + qwen3-embedding) and the matching API on :8000.
-#   docker compose -f docker/docker-compose.yml up --build      then open http://localhost:8000
-# Needs the NVIDIA container toolkit (Docker Desktop + WSL2 on Windows) and the models already pulled/created in
-# the host's Ollama folder (OLLAMA_HOME, default %USERPROFILE%/.ollama): qwen-v4 is built by scripts/qwen_build_ollama.py.
-# Corpus, index and the extraction cache stay on the host (output/ is gitignored and holds personal data).
+# The demo stack, one container per service:
+#   frontend (Next.js, :3000) -> api (FastAPI + LangGraph, :8000, Swagger at /docs) -> ollama (GPU: qwen-v4 + qwen3-embedding)
+#                                                                                -> vectordb (pgvector: JD vectors)
+#                                                                                -> historydb (PostgreSQL: runs + feedback)
+#   prometheus (:9090) scrapes the API; grafana (:3001) shows the dashboard.
+#
+# Run on a Linux host with an NVIDIA GPU (Docker + NVIDIA container toolkit), from the repo root:
+#   docker compose -f docker/docker-compose.yml pull     # the api + frontend images CI pushed to GHCR (or: up --build)
+#   MODELS_DIR=/path/to/models docker compose -f docker/docker-compose.yml up -d
+# MODELS_DIR holds qwen-v4-q4_K_M.gguf (built by scripts/qwen_build_ollama.py); ollama-init loads it into Ollama once.
+# The corpus, retrieval index and extraction cache are mounted from the host's output/ (git-ignored: personal data).
+# The databases are reachable only inside the stack; set PG_PASSWORD to change their password.
 services:
+  frontend:
+    image: ghcr.io/isntbim/ai-agent-for-cv-matching-and-job-recommendation/frontend:latest
+    build:
+      context: ../frontend
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  api:
+    image: ghcr.io/isntbim/ai-agent-for-cv-matching-and-job-recommendation/api:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      VECTOR_DSN: postgresql://postgres:${PG_PASSWORD:-cvmatch}@vectordb:5432/vectors
+      HISTORY_DSN: postgresql://postgres:${PG_PASSWORD:-cvmatch}@historydb:5432/history
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../output:/app/output                          # corpus_v2, index_v2, JD texts, extraction cache (written)
+      - ../.cache/retrieval:/app/.cache/retrieval      # bge-m3 weights + query-embedding cache (written)
+      - hf-cache:/app/.cache/hf                        # Qwen2.5 tokenizer, downloaded on first start
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+      vectordb:
+        condition: service_healthy
+      historydb:
+        condition: service_healthy
+
   ollama:
     image: ollama/ollama:0.40.14
     environment:
       OLLAMA_NUM_PARALLEL: "1"   # 12 GB GPU: qwen-v4 (6.6 GB) and the embedder (3.1 GB) both stay loaded
       OLLAMA_KEEP_ALIVE: "30m"
     volumes:
-      - ${OLLAMA_HOME:-${USERPROFILE}/.ollama}:/root/.ollama
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      retries: 20
     deploy:
       resources:
         reservations:
@@ -19,20 +64,46 @@ services:
               count: 1
               capabilities: [gpu]
 
-  api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+  # One-shot: puts the two models into Ollama the first time (skipped once they are there), then exits.
+  ollama-init:
+    image: ollama/ollama:0.40.14
     environment:
-      OLLAMA_URL: http://ollama:11434
-    ports:
-      - "8000:8000"
+      OLLAMA_HOST: http://ollama:11434
     volumes:
-      - ../output:/app/output                 # corpus_v2, index_v2, JD texts, extraction cache (written)
-      - ../.cache/retrieval:/app/.cache/retrieval      # bge-m3 weights + query-embedding cache (written)
-      - hf-cache:/app/.cache/hf               # Qwen2.5 tokenizer, downloaded on first start
+      - ${MODELS_DIR:-../models}:/models:ro
+      - ./ollama/Modelfile.qwen-v4:/Modelfile.qwen-v4:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        (ollama show qwen-v4 > /dev/null 2>&1 || ollama create qwen-v4 -f /Modelfile.qwen-v4) &&
+        (ollama show qwen3-embedding:4b > /dev/null 2>&1 || ollama pull qwen3-embedding:4b)
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
+
+  vectordb:
+    image: pgvector/pgvector:0.8.0-pg17
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-cvmatch}
+      POSTGRES_DB: vectors
+    volumes:
+      - vectordb:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "vectors"]
+      interval: 5s
+      retries: 20
+
+  historydb:
+    image: postgres:17.5-alpine
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-cvmatch}
+      POSTGRES_DB: history
+    volumes:
+      - historydb:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "history"]
+      interval: 5s
+      retries: 20
 
   # Monitoring: Prometheus scrapes the API's /metrics; Grafana (http://localhost:3001, admin / admin on first login)
   # opens with the provisioned "CV Match service" dashboard.
@@ -53,9 +124,12 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3001:3000"   # 3000 is the Next.js front end's dev port
+      - "3001:3000"   # the front end has 3000
     depends_on:
       - prometheus
 
 volumes:
+  ollama:
+  vectordb:
+  historydb:
   hf-cache:

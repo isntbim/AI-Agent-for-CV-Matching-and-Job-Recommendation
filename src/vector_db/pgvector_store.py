@@ -374,6 +374,8 @@ class PGVectorStore:
 
         with self._connect() as conn:
             with conn.cursor() as cur:
+                # an HNSW scan returns at most ef_search rows (default 40): widen it so top_k is always filled
+                cur.execute(f"SET LOCAL hnsw.ef_search = {max(100, 2 * int(top_k))}")
                 cur.execute(sql, params)
                 rows = cur.fetchall()
 

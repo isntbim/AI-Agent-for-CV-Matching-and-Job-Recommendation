@@ -183,24 +183,58 @@ def with_jobs(out: dict) -> dict:
     return out
 
 
-# --- history and feedback: one SQLite file beside the extraction cache (output/ is git-ignored and holds personal data)
-def db() -> sqlite3.Connection:
-    path = Path(os.environ.get("HISTORY_DB", svc.ROOT / "output/service/history.sqlite"))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
-    con.executescript("""
-        CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, created TEXT, cv_sha TEXT, seconds REAL, answer TEXT);
-        CREATE TABLE IF NOT EXISTS feedback (run_id INTEGER, jd TEXT, vote INTEGER, grade TEXT, comment TEXT, created TEXT,
-                                             PRIMARY KEY (run_id, jd));""")
+# --- history and feedback: PostgreSQL when HISTORY_DSN is set (the Docker stack's history database), otherwise one
+# SQLite file beside the extraction cache (output/ is git-ignored and holds personal data). The queries are written once
+# with ? placeholders; RETURNING and ON CONFLICT work on both.
+RUNS_DDL = "CREATE TABLE IF NOT EXISTS runs (id {id} PRIMARY KEY, created TEXT, cv_sha TEXT, seconds REAL, answer TEXT)"
+FEEDBACK_DDL = """CREATE TABLE IF NOT EXISTS feedback (run_id INTEGER, jd TEXT, vote INTEGER, grade TEXT, comment TEXT,
+                  created TEXT, PRIMARY KEY (run_id, jd))"""
+
+
+class PgConnection:
+    """A psycopg connection with the sqlite3 call shape used below: ? placeholders, `with con:` commits."""
+
+    def __init__(self, dsn: str):
+        import psycopg
+        self.con = psycopg.connect(dsn)
+
+    def execute(self, sql: str, params=()):
+        return self.con.execute(sql.replace("?", "%s"), params)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, *_):
+        self.con.commit() if kind is None else self.con.rollback()
+
+    def close(self) -> None:
+        self.con.close()
+
+
+SCHEMA_READY: set[str] = set()  # create the tables once per database, not on every request
+
+
+def db():
+    if dsn := os.environ.get("HISTORY_DSN"):
+        con, key, ddl = PgConnection(dsn), dsn, [RUNS_DDL.format(id="SERIAL"), FEEDBACK_DDL]
+    else:
+        path = Path(os.environ.get("HISTORY_DB", svc.ROOT / "output/service/history.sqlite"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        con, key, ddl = sqlite3.connect(path), str(path), [RUNS_DDL.format(id="INTEGER"), FEEDBACK_DDL]
+    if key not in SCHEMA_READY:
+        with con:
+            for statement in ddl:
+                con.execute(statement)
+        SCHEMA_READY.add(key)
     return con
 
 
 def save(body: str, out: dict, seconds: float) -> dict:
     """Store the answer (without job texts, which live in the corpus) and return it with its run id."""
     with closing(db()) as con, con:
-        run = con.execute("INSERT INTO runs (created, cv_sha, seconds, answer) VALUES (?, ?, ?, ?)",
+        run = con.execute("INSERT INTO runs (created, cv_sha, seconds, answer) VALUES (?, ?, ?, ?) RETURNING id",
                           (datetime.now().isoformat(timespec="seconds"), hashlib.sha256(body.encode()).hexdigest()[:16],
-                           seconds, json.dumps(out, ensure_ascii=False))).lastrowid
+                           seconds, json.dumps(out, ensure_ascii=False))).fetchone()[0]
     return with_jobs(out | {"run_id": run, "seconds": seconds})
 
 
@@ -310,6 +344,7 @@ def feedback(f: Feedback) -> dict:
         row = con.execute("SELECT answer FROM runs WHERE id = ?", (f.run_id,)).fetchone()
         if row is None or f.jd not in {m["jd"] for m in json.loads(row[0])["matches"]}:
             raise HTTPException(404, "That job is not in that run.")
-        con.execute("INSERT OR REPLACE INTO feedback VALUES (?, ?, ?, ?, ?, ?)",
+        con.execute("INSERT INTO feedback VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (run_id, jd) DO UPDATE SET "
+                    "vote = excluded.vote, grade = excluded.grade, comment = excluded.comment, created = excluded.created",
                     (f.run_id, f.jd, f.vote, f.grade, f.comment, datetime.now().isoformat(timespec="seconds")))
     return {"saved": True}

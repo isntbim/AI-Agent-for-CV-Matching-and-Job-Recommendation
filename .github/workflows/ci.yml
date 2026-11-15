@@ -12,6 +12,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:  # the history and vector-store tests run on PostgreSQL + pgvector too (tests/unit/test_api.py, test_pgvector_store.py)
+        image: pgvector/pgvector:0.8.0-pg17
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 20
+    env:
+      PG_TEST_DSN: postgresql://postgres:ci@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,4 +57,9 @@ jobs:
         run: |
           IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')/api
           docker build -f docker/Dockerfile -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+          docker push --all-tags $IMAGE
+      - name: Build and push the frontend image
+        run: |
+          IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')/frontend
+          docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest frontend
           docker push --all-tags $IMAGE

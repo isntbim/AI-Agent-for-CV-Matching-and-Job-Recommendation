@@ -1,7 +1,8 @@
 import axios from 'axios';
 
+// '' = same origin: the Docker image's Next.js server forwards /api/* to the API container (next.config.js)
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+  process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
