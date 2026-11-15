@@ -21,10 +21,13 @@ Run tests:
 from __future__ import annotations
 
 import hashlib
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.parser.schemas import ResumeSchema
 
 # ---------------------------------------------------------------------------
 # Protocol (Interface Contract)

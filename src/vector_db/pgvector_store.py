@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Dict, List, NamedTuple, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Dict, List, NamedTuple, Optional, Protocol, runtime_checkable
 
 import numpy as np
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.core.config import Settings
 
 
 # ---------------------------------------------------------------------------

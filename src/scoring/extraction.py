@@ -311,8 +311,18 @@ def extract_document(text: str, kind: Literal["resume", "job"], client: LLMClien
         raise ValueError("ruleset must be v1, v2 or v3")
     if client is None or isinstance(client, MockLLMClient):
         raise ExtractionError("A real, explicitly configured extraction client is required")
-    if not text.strip() or len(text) > max_chars:
-        raise ExtractionError("Empty text or text exceeds max_chars; no silent truncation")
+    if not text.strip():
+        raise ExtractionError("Empty text")
+    if len(text) > max_chars:
+        if kind != "resume":
+            raise ExtractionError("Job text exceeds max_chars; no silent truncation")
+        # A long CV is read in pieces and merged, never cut: every quote still has to be found in the whole text.
+        parts = [extract_document(chunk, kind, client, max_chars, max_tokens, ruleset, as_of)
+                 for chunk in _chunks(text, max_chars // 2)]
+        merged = _merge([p.model_dump(mode="json", exclude={"annotation"}) for p in parts])
+        result = ResumeInput.model_validate(merged)
+        validate_evidence(result.facts, text)
+        return _v2_annotation(result, text, ruleset) if ruleset in {"v2", "v3"} else result
     if kind == "resume":
         adapter = _ResumeEnvelopeClient(client, text, ruleset, as_of)
         document = extract_resume_from_text(text, client=adapter, temperature=0, max_tokens=max_tokens)
@@ -331,6 +341,35 @@ def extract_document(text: str, kind: Literal["resume", "job"], client: LLMClien
                url="urn:sha256:" + text_hash(text), scraped_at="not-applicable")
     result = JobInput(document=JobDescriptionSchema.model_validate(doc), facts=facts)
     return _v2_annotation(result, text, ruleset) if ruleset in {"v2", "v3"} else result
+
+
+def _chunks(text: str, size: int) -> list[str]:
+    """Pieces of at most `size` characters, cut at a blank line (else a line break, else a space) so that no
+    sentence a quote could come from is split."""
+    out = []
+    while len(text) > size:
+        window = text[:size]
+        cut = next((i for i in (window.rfind("\n\n"), window.rfind("\n"), window.rfind(" ")) if i > size // 2), size)
+        out.append(text[:cut])
+        text = text[cut:]
+    return [c for c in out + [text] if c.strip()]
+
+
+def _merge(parts: list):
+    """Merge per-piece extractions: lists are joined without duplicates, objects key by key, a flag holds only if
+    every piece says so (e.g. no_skills), any other value comes from the first piece that has one."""
+    parts = [p for p in parts if p is not None] or [None]  # a piece may leave an optional field empty
+    if isinstance(parts[0], dict):
+        return {k: _merge([p[k] for p in parts if k in p]) for k in dict.fromkeys(k for p in parts for k in p)}
+    if isinstance(parts[0], list):
+        out = []
+        for item in (i for p in parts for i in p):
+            if item not in out:
+                out.append(item)
+        return out
+    if isinstance(parts[0], bool):
+        return all(parts)
+    return next((p for p in parts if p not in (None, "")), parts[0])
 
 
 def _v2_annotation(result: ResumeInput | JobInput, text: str, ruleset="v2"):

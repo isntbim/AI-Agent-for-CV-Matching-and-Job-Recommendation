@@ -21,10 +21,11 @@ from trl import SFTConfig, SFTTrainer
 TASKS = ("cv_extraction", "jd_extraction")
 
 
-def rows(data: Path, split: str, exclude: tuple[str, ...] = (), upsample: dict[str, int] | None = None) -> list[dict]:
+def rows(data: Path, split: str, exclude: tuple[str, ...] = (), upsample: dict[str, int] | None = None,
+         tasks: tuple[str, ...] = TASKS) -> list[dict]:
     """exclude/upsample match the row's `source` by prefix (e.g. 'external', 'gold'); applied to train only by the caller."""
     out = []
-    for task in TASKS:
+    for task in tasks:
         for line in (data / task / f"{split}.jsonl").read_text(encoding="utf-8").splitlines():
             r = json.loads(line)
             if r.get("source", "").startswith(exclude) if exclude else False:
@@ -60,6 +61,7 @@ def main() -> None:
     p.add_argument("--eval-steps", type=int, default=25)
     p.add_argument("--max-steps", type=int, default=-1, help="cap steps (smoke test)")
     p.add_argument("--seed", type=int, default=3407)
+    p.add_argument("--tasks", nargs="+", default=list(TASKS), help="task folders under --data, e.g. explanation (O5)")
     p.add_argument("--resume", default=None)
     p.add_argument("--exclude-source", nargs="*", default=[], help="drop train rows whose source starts with these, e.g. external")
     p.add_argument("--upsample-source", nargs="*", default=[], help="repeat train rows, e.g. gold:4")
@@ -80,7 +82,7 @@ def main() -> None:
                    name=args.out.name, config={"script_args": {k: str(v) for k, v in vars(args).items()},
                    "gpu": torch.cuda.get_device_name(0), "versions": {m.__name__: m.__version__ for m in
                    (torch, transformers, trl, peft, unsloth, wandb)}})
-        data_art = wandb.Artifact("qwen-sft-data", type="dataset", description="CV + JD extraction SFT JSONL + manifest")
+        data_art = wandb.Artifact("o5-explanation-sft-data" if args.tasks == ["explanation"] else "qwen-sft-data", type="dataset", description=f"SFT JSONL for {args.tasks}")
         data_art.add_dir(str(args.data))
         wandb.run.use_artifact(data_art)
         wandb.run.log_code(str(Path(__file__).parent))
@@ -92,8 +94,9 @@ def main() -> None:
         use_gradient_checkpointing="unsloth", random_state=args.seed,
     )
     upsample = {s.split(":")[0]: int(s.split(":")[1]) for s in args.upsample_source}
-    train, train_dropped = to_dataset(rows(args.data, "train", tuple(args.exclude_source), upsample), tok, args.max_len)
-    val, val_dropped = to_dataset(rows(args.data, "validation"), tok, args.max_len)
+    train, train_dropped = to_dataset(rows(args.data, "train", tuple(args.exclude_source), upsample, tuple(args.tasks)),
+                                      tok, args.max_len)
+    val, val_dropped = to_dataset(rows(args.data, "validation", tasks=tuple(args.tasks)), tok, args.max_len)
     print(f"train {len(train)} (dropped {len(train_dropped)} over {args.max_len} tokens), val {len(val)} (dropped {len(val_dropped)})")
     if not args.no_wandb:
         wandb.run.summary.update({"train_rows": len(train), "val_rows": len(val), "train_dropped": train_dropped, "val_dropped": val_dropped,
