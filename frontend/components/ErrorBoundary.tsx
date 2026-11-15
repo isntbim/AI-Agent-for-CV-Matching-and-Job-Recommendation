@@ -1,5 +1,5 @@
 import React, { Component, ReactNode } from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { ExclamationTriangleIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 
 interface Props {
   children: ReactNode;
@@ -36,40 +36,45 @@ export default class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="w-8 h-8 text-red-600" />
+        <div className="min-h-screen bg-ground flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bento-card p-8 space-y-5">
+            <div className="w-11 h-11 rounded-ctrl border border-bad-line bg-bad-bg flex items-center justify-center text-bad">
+              <ExclamationTriangleIcon className="w-6 h-6" aria-hidden="true" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              Oops! Something went wrong
-            </h1>
-            <p className="text-gray-600 mb-6">
-              We encountered an unexpected error. Please try refreshing the page or contact support if the problem persists.
-            </p>
+            <div className="space-y-2">
+              <h1 className="text-[24px] text-ink">
+                Interface error encountered
+              </h1>
+              <p className="text-[16px] text-body">
+                A component failed to render. Retry the view or reload the
+                application.
+              </p>
+            </div>
             {this.state.error && (
-              <details className="mb-6 text-left">
-                <summary className="cursor-pointer text-sm text-gray-500 mb-2">
-                  Error Details
+              <details className="text-left">
+                <summary className="cursor-pointer text-[14px] text-muted py-1">
+                  Inspect error trace
                 </summary>
-                <pre className="text-xs bg-gray-100 p-3 rounded overflow-auto max-h-32">
+                <pre className="mt-2 text-[13px] font-mono bg-surface p-3 rounded-ctrl border border-hairline overflow-auto max-h-36 text-ink">
                   {this.state.error.toString()}
                 </pre>
               </details>
             )}
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row gap-3 pt-1">
               <button
+                type="button"
                 onClick={this.handleReset}
-                className="btn-primary inline-flex items-center justify-center"
+                className="btn-primary"
               >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Try Again
+                <ArrowPathIcon className="w-4 h-4" aria-hidden="true" />
+                <span>Retry view</span>
               </button>
               <button
+                type="button"
                 onClick={() => window.location.reload()}
                 className="btn-secondary"
               >
-                Reload Page
+                <span>Reload page</span>
               </button>
             </div>
           </div>

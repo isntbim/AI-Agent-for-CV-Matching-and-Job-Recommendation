@@ -1,8 +1,7 @@
 import React, { useCallback, useState, useEffect } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import {
-  CloudArrowUpIcon,
+  ArrowUpTrayIcon,
   DocumentTextIcon,
   XMarkIcon,
   CheckCircleIcon,
@@ -40,21 +39,25 @@ const FileUpload: React.FC<FileUploadProps> = ({
   useEffect(() => {
     if (externalSelectedFile !== undefined) {
       setUploadedFile(externalSelectedFile);
+      if (externalSelectedFile === null) {
+        setError(null);
+      }
     }
   }, [externalSelectedFile]);
 
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: any[]) => {
+    (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
       setError(null);
 
       if (rejectedFiles.length > 0) {
         const rejection = rejectedFiles[0];
-        if (rejection.errors[0]?.code === 'file-too-large') {
+        const code = rejection.errors[0]?.code;
+        if (code === 'file-too-large') {
           setError('File size exceeds the 5 MB limit.');
-        } else if (rejection.errors[0]?.code === 'file-invalid-type') {
-          setError('Unsupported file format. Upload a .pdf, .docx, or .txt file.');
+        } else if (code === 'file-invalid-type') {
+          setError('Unsupported file format. Choose a .pdf, .docx, or .txt file.');
         } else {
-          setError('Could not read the selected file. Please try another file.');
+          setError('Could not read the selected file. Try another file.');
         }
         return;
       }
@@ -84,11 +87,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return '0 B';
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   };
 
   const getFileBadge = (fileName: string) => {
@@ -106,159 +109,134 @@ const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   return (
-    <div className="w-full">
-      <AnimatePresence mode="wait">
-        {!uploadedFile ? (
-          <motion.div
-            key="dropzone"
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.2 }}
-          >
+    <div className="w-full space-y-3">
+      {!uploadedFile ? (
+        <div
+          {...getRootProps()}
+          aria-label="Upload CV file (.pdf, .docx, or .txt up to 5 MB)"
+          className={`rounded-panel border border-dashed p-6 text-center transition-colors ${
+            disabled
+              ? 'border-hairline bg-surface opacity-60 cursor-not-allowed'
+              : isDragReject || error
+                ? 'border-bad-line bg-bad-bg cursor-pointer'
+                : isDragActive
+                  ? 'border-accent bg-accent-soft cursor-pointer'
+                  : 'border-hairline-strong bg-ground hover:border-ink hover:bg-surface cursor-pointer'
+          }`}
+        >
+          <input {...getInputProps()} aria-label="CV file input" />
+
+          <div className="flex flex-col items-center gap-3">
             <div
-              {...getRootProps()}
-              aria-label="Upload CV file (.pdf, .docx, or .txt up to 5 MB)"
-              className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                isDragActive && !isDragReject
-                  ? 'border-primary-500 bg-primary-50 scale-[1.01]'
-                  : isDragReject || error
-                    ? 'border-error-500 bg-error-50'
-                    : disabled
-                      ? 'border-secondary-200 bg-secondary-50 cursor-not-allowed'
-                      : 'border-secondary-300 bg-white hover:border-primary-400 hover:bg-primary-25'
+              className={`w-11 h-11 rounded-ctrl border flex items-center justify-center ${
+                isDragReject || error
+                  ? 'bg-card border-bad-line text-bad'
+                  : isDragActive
+                    ? 'bg-card border-accent-line text-accent-text'
+                    : 'bg-card border-hairline text-ink'
               }`}
             >
-              <input {...getInputProps()} aria-label="CV file input" />
-
-              <div className="flex flex-col items-center space-y-4">
-                <motion.div
-                  animate={{
-                    y: isDragActive ? -4 : 0,
-                    scale: isDragActive ? 1.08 : 1,
-                  }}
-                  transition={{ duration: 0.2 }}
-                  className={`w-16 h-16 rounded-full flex items-center justify-center ${
-                    isDragActive && !isDragReject
-                      ? 'bg-primary-100 text-primary-600'
-                      : isDragReject || error
-                        ? 'bg-error-100 text-error-600'
-                        : 'bg-secondary-100 text-secondary-600'
-                  }`}
-                >
-                  {error ? (
-                    <ExclamationTriangleIcon className="w-8 h-8" />
-                  ) : (
-                    <CloudArrowUpIcon className="w-8 h-8" />
-                  )}
-                </motion.div>
-
-                <div className="space-y-2">
-                  {error ? (
-                    <div className="space-y-1">
-                      <p className="text-error-600 font-medium">{error}</p>
-                      <p className="text-sm text-secondary-500">
-                        Click or drag another file to try again
-                      </p>
-                    </div>
-                  ) : isDragActive ? (
-                    isDragReject ? (
-                      <p className="text-error-600 font-medium">
-                        Unsupported file type — use PDF, DOCX, or TXT
-                      </p>
-                    ) : (
-                      <p className="text-primary-600 font-medium">
-                        Drop your CV here to select it
-                      </p>
-                    )
-                  ) : (
-                    <div className="space-y-1">
-                      <p className="text-secondary-900 font-medium">
-                        Drop your CV here, or{' '}
-                        <span className="text-primary-600 underline">
-                          browse files
-                        </span>
-                      </p>
-                      <p className="text-sm text-secondary-500">
-                        Supports PDF, DOCX, and TXT files up to 5 MB
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center space-x-6 text-xs text-secondary-500">
-                  <div className="flex items-center space-x-1.5">
-                    <span className="px-1.5 py-0.5 rounded bg-secondary-100 font-semibold text-secondary-700">
-                      PDF
-                    </span>
-                    <span>Text PDF</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="px-1.5 py-0.5 rounded bg-secondary-100 font-semibold text-secondary-700">
-                      DOCX
-                    </span>
-                    <span>Word</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="px-1.5 py-0.5 rounded bg-secondary-100 font-semibold text-secondary-700">
-                      TXT
-                    </span>
-                    <span>Plain text</span>
-                  </div>
-                </div>
-              </div>
+              {error || isDragReject ? (
+                <ExclamationTriangleIcon className="w-5 h-5" aria-hidden="true" />
+              ) : (
+                <ArrowUpTrayIcon className="w-5 h-5" aria-hidden="true" />
+              )}
             </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="uploaded-file"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.2 }}
-            className="bg-white border border-secondary-200 rounded-xl p-5 shadow-soft"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center space-x-3 min-w-0">
-                <div className="w-11 h-11 rounded-lg bg-primary-50 border border-primary-200 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-primary-700">
-                    {getFileBadge(uploadedFile.name)}
+
+            <div className="space-y-1">
+              {error ? (
+                <>
+                  <p className="text-[15px] font-medium text-bad">{error}</p>
+                  <p className="text-[13px] text-muted">
+                    Select or drop another file to try again.
+                  </p>
+                </>
+              ) : isDragActive ? (
+                isDragReject ? (
+                  <p className="text-[15px] font-medium text-bad">
+                    Unsupported file format — drop a .pdf, .docx, or .txt file.
+                  </p>
+                ) : (
+                  <p className="text-[15px] font-medium text-accent-text">
+                    Release to attach this CV file.
+                  </p>
+                )
+              ) : (
+                <>
+                  <p className="text-[15px] font-medium text-ink">
+                    Drop a CV file here or{' '}
+                    <span className="underline underline-offset-4 text-accent-text">
+                      browse from disk
+                    </span>
+                  </p>
+                  <p className="text-[13px] text-muted">
+                    Accepts .pdf, .docx, and .txt up to 5 MB (200+ characters).
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-[12px] font-mono text-muted">
+              <span className="px-2 py-0.5 rounded bg-card border border-hairline text-ink">
+                .pdf
+              </span>
+              <span className="px-2 py-0.5 rounded bg-card border border-hairline text-ink">
+                .docx
+              </span>
+              <span className="px-2 py-0.5 rounded bg-card border border-hairline text-ink">
+                .txt
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-panel border border-hairline-strong bg-ground p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-ctrl bg-accent-soft border border-accent-line flex items-center justify-center shrink-0">
+                <span className="text-[12px] font-mono font-medium text-accent-text">
+                  {getFileBadge(uploadedFile.name)}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[15px] font-medium text-ink truncate">
+                  {uploadedFile.name}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted mt-0.5">
+                  <span className="font-mono tabular-nums">
+                    {formatFileSize(uploadedFile.size)}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 text-good font-medium">
+                    <CheckCircleIcon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    <span>Ready to match</span>
                   </span>
                 </div>
-                <div className="min-w-0">
-                  <h4 className="font-medium text-secondary-900 truncate">
-                    {uploadedFile.name}
-                  </h4>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-secondary-600 mt-0.5">
-                    <span>{formatFileSize(uploadedFile.size)}</span>
-                    <span>•</span>
-                    <span className="inline-flex items-center space-x-1 text-success-700 font-medium">
-                      <CheckCircleIcon className="w-4 h-4" />
-                      <span>Ready to match</span>
-                    </span>
-                  </div>
-                </div>
               </div>
-
-              <button
-                type="button"
-                onClick={removeFile}
-                disabled={disabled}
-                aria-label={`Remove selected file ${uploadedFile.name}`}
-                className="p-2 text-secondary-500 hover:text-error-600 hover:bg-error-50 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
-              >
-                <XMarkIcon className="w-5 h-5" />
-              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      <div className="mt-3 flex items-start space-x-2 text-xs text-secondary-600">
-        <DocumentTextIcon className="w-4 h-4 text-primary-600 shrink-0 mt-0.5" />
+            <button
+              type="button"
+              onClick={removeFile}
+              disabled={disabled}
+              aria-label={`Remove selected file ${uploadedFile.name}`}
+              className="inline-flex items-center justify-center w-[44px] h-[44px] rounded-ctrl border border-hairline bg-card text-muted hover:text-bad hover:border-bad-line transition-colors shrink-0 disabled:opacity-50"
+            >
+              <XMarkIcon className="w-5 h-5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-start gap-2 text-[13px] text-muted leading-relaxed">
+        <DocumentTextIcon
+          className="w-4 h-4 text-muted shrink-0 mt-0.5"
+          aria-hidden="true"
+        />
         <span>
-          Text-based PDFs, Word (.docx), and plain-text (.txt) CVs are extracted
-          directly. Scanned image-only PDFs should be exported as text first.
+          Text-based PDFs, Word (.docx), and plain-text (.txt) CVs are read
+          directly. Scanned image-only PDFs are rejected; export selectable text
+          first.
         </span>
       </div>
     </div>

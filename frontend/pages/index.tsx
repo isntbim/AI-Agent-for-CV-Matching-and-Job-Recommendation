@@ -1,144 +1,345 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { ArrowRightIcon } from '@heroicons/react/24/outline';
 import Header from '../components/Header';
 import Hero from '../components/Hero';
 import Features from '../components/Features';
 import Footer from '../components/Footer';
-import {
-  CpuChipIcon,
-  MagnifyingGlassIcon,
-  ChartBarIcon,
-  ChatBubbleBottomCenterTextIcon,
-  ArrowRightIcon,
-} from '@heroicons/react/24/outline';
+import { gsap, MOTION_QUERIES, useGSAP } from '../utils/gsap';
+
+const RUBRIC_ROWS = [
+  {
+    axis: 'Skills',
+    weight: 30,
+    rule: 'Normalized skill and taxonomy overlap against job tags',
+    fallback: 'Scored from CV skills',
+  },
+  {
+    axis: 'Title',
+    weight: 20,
+    rule: 'Role family and seniority match with latest CV titles',
+    fallback: 'Neutral 50 if omitted',
+  },
+  {
+    axis: 'Experience',
+    weight: 15,
+    rule: 'Cumulative months of tenure up to the cutoff date',
+    fallback: 'Neutral 50 if omitted',
+  },
+  {
+    axis: 'Education',
+    weight: 10,
+    rule: 'Highest degree level matched against stated floor',
+    fallback: 'Neutral 50 if omitted',
+  },
+  {
+    axis: 'Industry',
+    weight: 10,
+    rule: 'Domain overlap between employers and job sector',
+    fallback: 'Neutral 50 if omitted',
+  },
+  {
+    axis: 'Location',
+    weight: 8,
+    rule: 'City or remote compatibility with office address',
+    fallback: 'Neutral 50 if omitted',
+  },
+  {
+    axis: 'Salary',
+    weight: 7,
+    rule: 'Range compatibility when both sides disclose pay',
+    fallback: 'Neutral 75 if undisclosed',
+  },
+];
 
 const HomePage: React.FC = () => {
-  const steps = [
-    {
-      step: '01',
-      title: 'Qwen2.5-7B Extraction',
-      description:
-        'Fine-tuned Qwen2.5-7B (QLoRA) extracts structured skills, roles, experience, education, and domains from your CV, with a LangGraph validate-repair-retry loop.',
-      icon: CpuChipIcon,
+  const rubricRef = useRef<HTMLElement | null>(null);
+  const cachedSpeedRef = useRef<HTMLSpanElement | null>(null);
+  const weightNumRefs = useRef<Array<HTMLSpanElement | null>>([]);
+
+  useGSAP(
+    () => {
+      if (!rubricRef.current) return;
+      const mm = gsap.matchMedia();
+
+      mm.add(
+        MOTION_QUERIES,
+        (context) => {
+          if (!context.conditions?.canAnimate) return;
+
+          const snapInt = gsap.utils.snap(1);
+
+          const rubricTl = gsap.timeline({
+            defaults: { ease: 'power3.out' },
+            scrollTrigger: {
+              trigger: '[data-rubric-grid]',
+              start: 'top 86%',
+              once: true,
+            },
+          });
+
+          rubricTl
+            .from('[data-rubric-card]', {
+              y: 16,
+              opacity: 0.85,
+              immediateRender: false,
+              duration: 0.5,
+              stagger: 0.085,
+              clearProps: 'transform,opacity',
+            })
+            .from(
+              '[data-rubric-bar]',
+              {
+                scaleX: 0,
+                immediateRender: false,
+                transformOrigin: 'left center',
+                duration: 0.62,
+                stagger: 0.055,
+                ease: 'power2.out',
+                clearProps: 'transform',
+              },
+              '-=0.3'
+            );
+
+          if (cachedSpeedRef.current) {
+            const speedObj = { val: 0 };
+            rubricTl.to(
+              speedObj,
+              {
+                val: 0.9,
+                duration: 0.75,
+                ease: 'power2.out',
+                onUpdate: () => {
+                  if (cachedSpeedRef.current) {
+                    cachedSpeedRef.current.textContent =
+                      speedObj.val.toFixed(1);
+                  }
+                },
+              },
+              0.18
+            );
+          }
+
+          RUBRIC_ROWS.forEach((row, idx) => {
+            const el = weightNumRefs.current[idx];
+            if (!el) return;
+            const state = { val: 0 };
+            rubricTl.to(
+              state,
+              {
+                val: row.weight,
+                duration: 0.72,
+                ease: 'power2.out',
+                onUpdate: () => {
+                  if (weightNumRefs.current[idx]) {
+                    weightNumRefs.current[idx]!.textContent = String(
+                      snapInt(state.val)
+                    );
+                  }
+                },
+              },
+              0.2 + idx * 0.05
+            );
+          });
+
+          return () => {
+            if (cachedSpeedRef.current) {
+              cachedSpeedRef.current.textContent = '0.9';
+            }
+            RUBRIC_ROWS.forEach((row, idx) => {
+              if (weightNumRefs.current[idx]) {
+                weightNumRefs.current[idx]!.textContent = String(row.weight);
+              }
+            });
+          };
+        },
+        rubricRef
+      );
+
+      return () => mm.revert();
     },
-    {
-      step: '02',
-      title: 'Hybrid Candidate Retrieval',
-      description:
-        'Hybrid search combining BGE-M3 dense embeddings and BM25 lexical matching picks the 20 closest jobs out of 361 CareerViet postings.',
-      icon: MagnifyingGlassIcon,
-    },
-    {
-      step: '03',
-      title: 'Hybrid Rule + TF-IDF Ranking',
-      description:
-        'The hybrid_tfidf_v1 ranking model combines 7-dimension V3.1 rule scores with semantic embedding and TF-IDF similarity.',
-      icon: ChartBarIcon,
-    },
-    {
-      step: '04',
-      title: 'Explainable Results',
-      description:
-        'Plain-English explanations show matched skills, missing skills, 7-axis score breakdowns, and supporting quotes from your CV and the job.',
-      icon: ChatBubbleBottomCenterTextIcon,
-    },
-  ];
+    { scope: rubricRef }
+  );
 
   return (
     <>
       <Head>
-        <title>ResuMatch - CareerViet CV-to-Jobs Matching Pipeline</title>
+        <title>ResuMatch: CareerViet CV-to-job matching</title>
         <meta
           name="description"
-          content="Upload your CV once to match against 361 CareerViet job postings using a fine-tuned Qwen2.5-7B extractor, hybrid BGE-M3 + BM25 search, and 7-dimension explainable ranking."
+          content="Match a PDF, DOCX, or TXT resume against 361 CareerViet job postings locally on one 12 GB GPU using fine-tuned Qwen2.5-7B extraction, seven weighted rules, and hybrid Qwen3-Embedding-4B ranking."
         />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-secondary-50">
+      <div className="min-h-screen flex flex-col bg-ground text-body">
         <Header />
 
-        <main>
+        <main id="main-content" className="flex-1">
           <Hero />
+
           <Features />
 
-          {/* How It Works Section */}
-          <section className="py-20 bg-white">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                viewport={{ once: true }}
-                className="text-center mb-16"
-              >
-                <h2 className="text-3xl md:text-4xl font-bold text-secondary-900 mb-4">
-                  How the Pipeline Works
-                </h2>
-                <p className="text-lg text-secondary-600 max-w-2xl mx-auto">
-                  Four transparent stages take your raw CV from document parsing
-                  to ranked, explainable job matches.
-                </p>
-              </motion.div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                {steps.map((item, index) => (
-                  <motion.div
-                    key={item.step}
-                    initial={{ opacity: 0, y: 16 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: index * 0.1 }}
-                    viewport={{ once: true }}
-                    className="relative bg-secondary-50/60 rounded-2xl p-6 border border-secondary-200/80"
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-primary-600 to-accent-600 rounded-xl flex items-center justify-center shadow-sm">
-                        <item.icon className="w-6 h-6 text-white" />
-                      </div>
-                      <span className="text-xs font-mono font-bold text-primary-700 bg-primary-100 px-2.5 py-1 rounded-full">
-                        Step {item.step}
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-bold text-secondary-900 mb-2">
-                      {item.title}
-                    </h3>
-                    <p className="text-sm text-secondary-600 leading-relaxed">
-                      {item.description}
-                    </p>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* CTA Section */}
-          <section className="py-20 bg-gradient-to-r from-primary-600 to-accent-600">
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                viewport={{ once: true }}
-              >
-                <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-                  Ready to Find Your Best-Fitting CareerViet Jobs?
-                </h2>
-                <p className="text-lg text-primary-100 mb-8 max-w-2xl mx-auto">
-                  Upload a PDF, DOCX, or TXT resume—or paste your CV text
-                  directly—and inspect your ranked matches across all 7 scoring
-                  dimensions.
-                </p>
-                <Link
-                  href="/analyze"
-                  className="inline-flex items-center gap-2 bg-white text-primary-700 hover:bg-primary-50 font-semibold py-4 px-8 rounded-xl shadow-large hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white"
+          {/* Section 3: Deterministic V3.1 Rubric & Runtime Contract (shares 5/7 split line with Hero) */}
+          <section
+            ref={rubricRef}
+            id="rubric"
+            aria-labelledby="rubric-heading"
+            className="py-16 sm:py-24 border-t border-hairline"
+          >
+            <div className="wrap space-y-10 sm:space-y-12">
+              <div className="max-w-3xl">
+                <h2
+                  id="rubric-heading"
+                  data-rubric-heading
+                  className="text-[28px] sm:text-[36px] leading-[1.14] text-ink"
                 >
-                  <span>Match My CV Now</span>
-                  <ArrowRightIcon className="w-5 h-5" />
-                </Link>
-              </motion.div>
+                  CareerViet 100-point scoring rubric
+                </h2>
+              </div>
+
+              <div
+                data-rubric-grid
+                className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
+              >
+                {/* Left Column (span 5, aligned with Hero split): Runtime Spec + Visual + CTA */}
+                <div className="lg:col-span-5 space-y-6 min-w-0">
+                  <div
+                    data-rubric-card
+                    className="bento-card p-6 sm:p-8 space-y-5"
+                  >
+                    <h3 className="text-[20px] leading-snug text-ink">
+                      Resume input & latency spec
+                    </h3>
+
+                    <dl className="space-y-3 text-[15px]">
+                      <div className="pb-2.5 border-b border-hairline flex items-baseline justify-between gap-4">
+                        <dt className="text-muted">Accepted files</dt>
+                        <dd className="font-mono text-[14px] text-ink text-right">
+                          .pdf, .docx, .txt ≤ 5&nbsp;MB
+                        </dd>
+                      </div>
+                      <div className="pb-2.5 border-b border-hairline flex items-baseline justify-between gap-4">
+                        <dt className="text-muted">Minimum text</dt>
+                        <dd className="font-mono text-[14px] text-ink text-right">
+                          200&nbsp;chars
+                        </dd>
+                      </div>
+                      <div className="pb-2.5 border-b border-hairline flex items-baseline justify-between gap-4">
+                        <dt className="text-muted">First CV run</dt>
+                        <dd className="font-mono text-[14px] text-ink text-right">
+                          20–60&nbsp;s (12&nbsp;GB&nbsp;GPU)
+                        </dd>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-4">
+                        <dt className="text-muted">Cached CV</dt>
+                        <dd className="font-mono text-[14px] text-good text-right tabular-nums">
+                          ~<span ref={cachedSpeedRef}>0.9</span>&nbsp;s
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div
+                      data-visual="cutoff-calibration"
+                      className="bento-panel bento-panel--teal p-4"
+                    >
+                      <div className="ui-frag p-3.5 space-y-2 font-mono text-[13px]">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted">V3.1 rule bands</span>
+                          <span className="text-ink">43 · 58 / 100</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted">hybrid_qwen_v1 fit</span>
+                          <span className="text-ink">32.0 · 86.2 / 100</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                      <Link
+                        href="/analyze"
+                        className="btn-primary w-full sm:w-auto"
+                      >
+                        <span>Upload a CV</span>
+                        <ArrowRightIcon
+                          className="w-4 h-4 m-arrow"
+                          aria-hidden="true"
+                        />
+                      </Link>
+                      <Link
+                        href="/help"
+                        className="btn-secondary w-full sm:w-auto"
+                      >
+                        <span>Open usage guide</span>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column (span 7, aligned with Hero split): 7-Rule Specification Table + Animated Weight Bars */}
+                <div
+                  data-rubric-card
+                  className="bento-card lg:col-span-7 p-6 sm:p-8 space-y-5 overflow-hidden min-w-0"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-[20px] leading-snug text-ink">
+                      Seven V3.1 rule weights
+                    </h3>
+                    <span className="font-mono text-[13px] text-accent-text font-medium">
+                      30 + 20 + 15 + 10 + 10 + 8 + 7 = 100
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-hairline border-t border-b border-hairline">
+                    {RUBRIC_ROWS.map((row, idx) => (
+                      <div key={row.axis} className="py-3.5 space-y-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-baseline text-[15px]">
+                          <div className="sm:col-span-3 flex items-center justify-between sm:justify-start gap-2">
+                            <span className="font-medium text-ink">
+                              {row.axis}
+                            </span>
+                            <span className="font-mono text-[12px] px-2 py-0.5 rounded bg-accent-soft border border-accent-line text-accent-text tabular-nums">
+                              <span
+                                ref={(el) => {
+                                  weightNumRefs.current[idx] = el;
+                                }}
+                              >
+                                {row.weight}
+                              </span>
+                              &nbsp;pt
+                            </span>
+                          </div>
+                          <p className="sm:col-span-6 text-body leading-relaxed">
+                            {row.rule}
+                          </p>
+                          <p className="sm:col-span-3 font-mono text-[12px] text-muted sm:text-right">
+                            {row.fallback}
+                          </p>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-surface overflow-hidden">
+                          <div
+                            data-rubric-bar
+                            className="h-full rounded-full bar-brand origin-left"
+                            style={{ width: `${(row.weight / 30) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 text-[13px] font-mono">
+                    <span className="px-2.5 py-1 rounded bg-good-bg text-good border border-good-line">
+                      Fit ≥ 86.2 Good Fit
+                    </span>
+                    <span className="px-2.5 py-1 rounded bg-pot-bg text-pot border border-pot-line">
+                      32.0–86.1 Potential Fit
+                    </span>
+                    <span className="px-2.5 py-1 rounded bg-bad-bg text-bad border border-bad-line">
+                      &lt; 32.0 No Fit
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
         </main>

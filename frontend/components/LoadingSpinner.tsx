@@ -1,25 +1,25 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 
 interface LoadingSpinnerProps {
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
 
-export default function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerProps) {
+export default function LoadingSpinner({
+  size = 'md',
+  className = '',
+}: LoadingSpinnerProps) {
   const sizeClasses = {
-    sm: 'w-4 h-4',
-    md: 'w-8 h-8',
-    lg: 'w-12 h-12',
+    sm: 'w-4 h-4 border-2',
+    md: 'w-6 h-6 border-2',
+    lg: 'w-9 h-9 border-[2.5px]',
   };
 
   return (
-    <motion.div
-      className={`${sizeClasses[size]} ${className}`}
-      animate={{ rotate: 360 }}
-      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-    >
-      <div className="w-full h-full border-2 border-primary-200 border-t-primary-600 rounded-full" />
-    </motion.div>
+    <span
+      role="status"
+      aria-label="Loading"
+      className={`inline-block rounded-full border-hairline border-t-accent animate-spin ${sizeClasses[size]} ${className}`}
+    />
   );
 }

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect, useRef, useId } from 'react';
+import toast from 'react-hot-toast';
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
@@ -7,22 +7,33 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   DocumentTextIcon,
-  SparklesIcon,
   ArrowPathIcon,
   ChatBubbleBottomCenterTextIcon,
+  HandThumbUpIcon,
+  HandThumbDownIcon,
 } from '@heroicons/react/24/outline';
 import {
+  DIMENSION_WEIGHTS,
   FitGrade,
   JobMatch,
   MatchResponse,
+  SavedFeedback,
   SCORE_DIMENSIONS,
   ScoreDimension,
   parseUnscoredDimensions,
+  submitFeedback,
 } from '../services/api';
+import {
+  gsap,
+  MOTION_QUERIES,
+  ScrollTrigger,
+  useGSAP,
+} from '../utils/gsap';
 
 interface AnalysisResultsProps {
   result: MatchResponse;
   onNewAnalysis?: () => void;
+  onFeedbackSaved?: () => void;
 }
 
 const DIMENSION_LABELS: Record<ScoreDimension, string> = {
@@ -39,21 +50,18 @@ function getGradeMeta(grade: FitGrade) {
   switch (grade) {
     case 'Good Fit':
       return {
-        badgeClass: 'bg-success-50 text-success-800 border-success-200',
-        ringColor: '#16a34a',
+        badgeClass: 'bg-good-bg text-good border-good-line',
         Icon: CheckCircleIcon,
       };
     case 'Potential Fit':
       return {
-        badgeClass: 'bg-warning-50 text-warning-800 border-warning-200',
-        ringColor: '#d97706',
+        badgeClass: 'bg-pot-bg text-pot border-pot-line',
         Icon: ExclamationTriangleIcon,
       };
     case 'No Fit':
     default:
       return {
-        badgeClass: 'bg-error-50 text-error-800 border-error-200',
-        ringColor: '#dc2626',
+        badgeClass: 'bg-bad-bg text-bad border-bad-line',
         Icon: XCircleIcon,
       };
   }
@@ -61,49 +69,66 @@ function getGradeMeta(grade: FitGrade) {
 
 interface FitScoreRingProps {
   fit: number;
-  grade: FitGrade;
 }
 
-const FitScoreRing: React.FC<FitScoreRingProps> = ({ fit, grade }) => {
+const FitScoreRing: React.FC<FitScoreRingProps> = ({ fit }) => {
   const clamped = Math.max(0, Math.min(100, fit));
-  const radius = 28;
+  const rounded = Math.round(clamped);
+  const radius = 26;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (clamped / 100) * circumference;
-  const { ringColor } = getGradeMeta(grade);
+  const rawId = useId();
+  const gradId = `fit-ring-${rawId.replace(/:/g, '')}`;
 
   return (
     <div
-      className="relative w-18 h-18 flex items-center justify-center shrink-0"
+      className="relative w-16 h-16 flex items-center justify-center shrink-0"
       aria-label={`Overall fit score ${clamped.toFixed(1)} out of 100`}
     >
-      <svg className="w-16 h-16 -rotate-90" viewBox="0 0 68 68">
+      <svg
+        className="w-16 h-16 -rotate-90"
+        viewBox="0 0 64 64"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--ring-stop-1)" />
+            <stop offset="50%" stopColor="var(--ring-stop-2)" />
+            <stop offset="100%" stopColor="var(--ring-stop-3)" />
+          </linearGradient>
+        </defs>
         <circle
-          cx="34"
-          cy="34"
+          cx="32"
+          cy="32"
           r={radius}
           fill="none"
-          stroke="#e2e8f0"
-          strokeWidth="6"
+          stroke="var(--line-strong)"
+          strokeWidth="5"
         />
         <circle
-          cx="34"
-          cy="34"
+          data-fit-ring-arc
+          data-circumference={circumference}
+          data-target-offset={offset}
+          cx="32"
+          cy="32"
           r={radius}
           fill="none"
-          stroke={ringColor}
-          strokeWidth="6"
+          stroke={`url(#${gradId})`}
+          strokeWidth="5"
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
         />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-sm font-bold text-secondary-900 leading-none">
-          {Math.round(clamped)}
+      <div className="absolute inset-0 flex flex-col items-center justify-center font-mono tabular-nums">
+        <span
+          data-fit-number
+          data-target-fit={rounded}
+          className="text-[14px] font-medium text-ink leading-none"
+        >
+          {rounded}
         </span>
-        <span className="text-[10px] text-secondary-500 leading-none mt-0.5">
-          /100
-        </span>
+        <span className="text-[10px] text-muted leading-none mt-0.5">/100</span>
       </div>
     </div>
   );
@@ -115,9 +140,13 @@ interface RadarChartProps {
 }
 
 const SevenAxisRadar: React.FC<RadarChartProps> = ({ scores, unscored }) => {
+  const radarWrapRef = useRef<HTMLDivElement | null>(null);
+  const rawId = useId();
+  const polyGradId = `radar-fill-${rawId.replace(/:/g, '')}`;
+
   const cx = 140;
-  const cy = 125;
-  const maxR = 72;
+  const cy = 122;
+  const maxR = 68;
   const levels = [0.25, 0.5, 0.75, 1.0];
   const n = SCORE_DIMENSIONS.length;
 
@@ -131,165 +160,136 @@ const SevenAxisRadar: React.FC<RadarChartProps> = ({ scores, unscored }) => {
     };
   };
 
-  // For the polygon shape, scored dimensions use their actual score/100;
-  // unscored dimensions sit at 0.35 on the dashed spoke so the polygon stays visually balanced
-  // while clearly marked as greyed/unscored dots and "not scored" in the legend.
   const polygonPoints = SCORE_DIMENSIONS.map((dim, i) => {
     const isUnscored = unscored.has(dim);
     const ratio = isUnscored
       ? 0.35
-      : Math.max(0.05, Math.min(1, (scores[dim] ?? 0) / 100));
+      : Math.max(0.06, Math.min(1, (scores[dim] ?? 0) / 100));
     const pt = pointAt(i, ratio);
     return `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
   }).join(' ');
 
+  useGSAP(
+    () => {
+      if (!radarWrapRef.current) return;
+      const mm = gsap.matchMedia();
+      mm.add(
+        MOTION_QUERIES,
+        (context) => {
+          if (!context.conditions?.canAnimate) return;
+          gsap.from('[data-radar-poly]', {
+            scale: 0.42,
+            opacity: 0,
+            svgOrigin: '140 122',
+            duration: 0.58,
+            ease: 'power3.out',
+            clearProps: 'opacity',
+          });
+        },
+        radarWrapRef
+      );
+      return () => mm.revert();
+    },
+    { scope: radarWrapRef }
+  );
+
   return (
-    <div className="flex flex-col lg:flex-row items-center gap-6 bg-secondary-50/70 rounded-xl p-4 border border-secondary-200/80">
-      <div className="w-full max-w-[280px] shrink-0">
-        <svg
-          viewBox="0 0 280 250"
-          className="w-full h-auto overflow-visible"
-          role="img"
-          aria-label="7-dimension score radar chart"
-        >
-          {/* Reference heptagons */}
-          {levels.map((lvl) => {
-            const ringPts = SCORE_DIMENSIONS.map((_, i) => {
-              const pt = pointAt(i, lvl);
-              return `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
-            }).join(' ');
-            return (
-              <polygon
-                key={lvl}
-                points={ringPts}
-                fill="none"
-                stroke="#e2e8f0"
-                strokeWidth="1"
+    <div ref={radarWrapRef} className="w-full max-w-[276px] mx-auto pt-1">
+      <svg
+        viewBox="0 0 280 244"
+        className="w-full h-auto overflow-visible"
+        role="img"
+        aria-label="Seven-dimension rule score radar chart"
+      >
+        <defs>
+          <linearGradient id={polyGradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--ring-stop-1)" />
+            <stop offset="100%" stopColor="var(--ring-stop-3)" />
+          </linearGradient>
+        </defs>
+
+        {levels.map((lvl) => {
+          const ringPts = SCORE_DIMENSIONS.map((_, i) => {
+            const pt = pointAt(i, lvl);
+            return `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
+          }).join(' ');
+          return (
+            <polygon
+              key={lvl}
+              points={ringPts}
+              fill="none"
+              stroke="var(--line)"
+              strokeWidth="1"
+            />
+          );
+        })}
+
+        {SCORE_DIMENSIONS.map((dim, i) => {
+          const outer = pointAt(i, 1);
+          const isUnscored = unscored.has(dim);
+          return (
+            <line
+              key={dim}
+              x1={cx}
+              y1={cy}
+              x2={outer.x}
+              y2={outer.y}
+              stroke="var(--line-strong)"
+              strokeWidth={isUnscored ? '1' : '1.25'}
+              strokeDasharray={isUnscored ? '4 4' : undefined}
+            />
+          );
+        })}
+
+        <polygon
+          data-radar-poly
+          points={polygonPoints}
+          fill={`url(#${polyGradId})`}
+          fillOpacity="0.22"
+          stroke="var(--accent)"
+          strokeWidth="2"
+        />
+
+        {SCORE_DIMENSIONS.map((dim, i) => {
+          const isUnscored = unscored.has(dim);
+          const ratio = isUnscored
+            ? 0.35
+            : Math.max(0.06, Math.min(1, (scores[dim] ?? 0) / 100));
+          const dot = pointAt(i, ratio);
+          const labelPt = pointAt(i, 1.25);
+          const a = angleForIndex(i);
+          const cos = Math.cos(a);
+          const textAnchor =
+            cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle';
+
+          return (
+            <g key={dim}>
+              <circle
+                cx={dot.x}
+                cy={dot.y}
+                r={isUnscored ? 3.5 : 4.25}
+                fill={isUnscored ? 'var(--card)' : 'var(--accent)'}
+                stroke={isUnscored ? 'var(--muted)' : 'var(--card)'}
+                strokeWidth="1.75"
               />
-            );
-          })}
-
-          {/* Spokes */}
-          {SCORE_DIMENSIONS.map((dim, i) => {
-            const outer = pointAt(i, 1);
-            const isUnscored = unscored.has(dim);
-            return (
-              <line
-                key={dim}
-                x1={cx}
-                y1={cy}
-                x2={outer.x}
-                y2={outer.y}
-                stroke={isUnscored ? '#cbd5e1' : '#94a3b8'}
-                strokeWidth={isUnscored ? '1.25' : '1.5'}
-                strokeDasharray={isUnscored ? '4 4' : undefined}
-              />
-            );
-          })}
-
-          {/* Radar polygon */}
-          <polygon
-            points={polygonPoints}
-            fill="rgba(37, 99, 235, 0.14)"
-            stroke="#2563eb"
-            strokeWidth="2"
-          />
-
-          {/* Axis dots & labels */}
-          {SCORE_DIMENSIONS.map((dim, i) => {
-            const isUnscored = unscored.has(dim);
-            const ratio = isUnscored
-              ? 0.35
-              : Math.max(0.05, Math.min(1, (scores[dim] ?? 0) / 100));
-            const dot = pointAt(i, ratio);
-            const labelPt = pointAt(i, 1.24);
-            const a = angleForIndex(i);
-            const cos = Math.cos(a);
-            const textAnchor =
-              cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle';
-
-            return (
-              <g key={dim}>
-                <circle
-                  cx={dot.x}
-                  cy={dot.y}
-                  r={isUnscored ? 4 : 4.5}
-                  fill={isUnscored ? '#f1f5f9' : '#2563eb'}
-                  stroke={isUnscored ? '#94a3b8' : '#ffffff'}
-                  strokeWidth="1.75"
-                />
-                <text
-                  x={labelPt.x}
-                  y={labelPt.y}
-                  textAnchor={textAnchor}
-                  dominantBaseline="middle"
-                  className={`text-[11px] ${
-                    isUnscored
-                      ? 'fill-secondary-400 italic'
-                      : 'fill-secondary-800 font-semibold'
-                  }`}
-                >
-                  {DIMENSION_LABELS[dim]}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-
-      {/* 7-Dimension Legend */}
-      <div className="w-full flex-1 space-y-2.5">
-        <div className="flex items-center justify-between text-xs text-secondary-500 pb-1 border-b border-secondary-200">
-          <span className="font-semibold text-secondary-700">
-            7-Dimension Rule Breakdown
-          </span>
-          <span>Scored vs. unscored axes</span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-          {SCORE_DIMENSIONS.map((dim) => {
-            const isUnscored = unscored.has(dim);
-            const rawScore = scores[dim] ?? 0;
-
-            return (
-              <div key={dim} className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span
-                    className={
-                      isUnscored
-                        ? 'text-secondary-400 font-normal'
-                        : 'text-secondary-800 font-medium'
-                    }
-                  >
-                    {DIMENSION_LABELS[dim]}
-                  </span>
-                  {isUnscored ? (
-                    <span className="px-1.5 py-0.5 rounded bg-secondary-200/70 text-secondary-600 text-[11px] font-medium">
-                      not scored
-                    </span>
-                  ) : (
-                    <span className="font-semibold text-secondary-900">
-                      {Math.round(rawScore)}/100
-                    </span>
-                  )}
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-secondary-200 overflow-hidden">
-                  {isUnscored ? (
-                    <div className="w-full h-full border-t border-dashed border-secondary-400" />
-                  ) : (
-                    <div
-                      className="h-full rounded-full bg-primary-600 transition-all duration-300"
-                      style={{
-                        width: `${Math.max(0, Math.min(100, rawScore))}%`,
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+              <text
+                x={labelPt.x}
+                y={labelPt.y}
+                textAnchor={textAnchor}
+                dominantBaseline="middle"
+                fill={isUnscored ? 'var(--muted)' : 'var(--ink)'}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: isUnscored ? 400 : 500,
+                  fontStyle: isUnscored ? 'italic' : 'normal',
+                }}
+              >
+                {DIMENSION_LABELS[dim]}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 };
@@ -297,17 +297,42 @@ const SevenAxisRadar: React.FC<RadarChartProps> = ({ scores, unscored }) => {
 interface JobMatchCardProps {
   match: JobMatch;
   rank: number;
+  runId?: number;
+  initialFeedback?: SavedFeedback;
+  onFeedbackSaved?: () => void;
 }
 
-const JobMatchCard: React.FC<JobMatchCardProps> = ({ match, rank }) => {
+const JobMatchCard: React.FC<JobMatchCardProps> = ({
+  match,
+  rank,
+  runId,
+  initialFeedback,
+  onFeedbackSaved,
+}) => {
   const [showRadar, setShowRadar] = useState(rank === 1);
   const [showJobText, setShowJobText] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
 
+  const [vote, setVote] = useState<1 | -1 | null>(
+    initialFeedback?.vote ?? null
+  );
+  const [overrideGrade, setOverrideGrade] = useState<FitGrade | ''>(
+    initialFeedback?.grade ?? ''
+  );
+  const [isSavingFeedback, setIsSavingFeedback] = useState(false);
+  const [feedbackSavedFlag, setFeedbackSavedFlag] = useState(
+    Boolean(initialFeedback)
+  );
+
+  useEffect(() => {
+    setVote(initialFeedback?.vote ?? null);
+    setOverrideGrade(initialFeedback?.grade ?? '');
+    setFeedbackSavedFlag(Boolean(initialFeedback));
+  }, [initialFeedback, runId, match.jd]);
+
   const unscored = parseUnscoredDimensions(match.explanation || []);
   const { badgeClass, Icon: GradeIcon } = getGradeMeta(match.grade);
 
-  // Skip line 0 which repeats the headline
   const explanationBullets =
     match.explanation && match.explanation.length > 1
       ? match.explanation.slice(1)
@@ -321,308 +346,642 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({ match, rank }) => {
     (match.matched_skills && match.matched_skills.length > 0) ||
     (match.missing_skills && match.missing_skills.length > 0);
 
+  const persistFeedback = async (
+    nextVote: 1 | -1,
+    nextGrade: FitGrade | ''
+  ) => {
+    if (typeof runId !== 'number') return;
+    setIsSavingFeedback(true);
+    try {
+      await submitFeedback({
+        run_id: runId,
+        jd: match.jd,
+        vote: nextVote,
+        grade: nextGrade || null,
+      });
+      setVote(nextVote);
+      setOverrideGrade(nextGrade);
+      setFeedbackSavedFlag(true);
+      onFeedbackSaved?.();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not save feedback.'
+      );
+    } finally {
+      setIsSavingFeedback(false);
+    }
+  };
+
+  const handleVoteClick = (clickedVote: 1 | -1) => {
+    let nextGrade = overrideGrade;
+    if (clickedVote === 1 && nextGrade && nextGrade !== match.grade) {
+      nextGrade = '';
+    }
+    if (clickedVote === -1 && nextGrade && nextGrade === match.grade) {
+      nextGrade = '';
+    }
+    void persistFeedback(clickedVote, nextGrade);
+  };
+
+  const handleGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selected = e.target.value as FitGrade | '';
+    if (!selected) {
+      if (vote !== null) {
+        void persistFeedback(vote, '');
+      } else {
+        setOverrideGrade('');
+      }
+      return;
+    }
+    const impliedVote: 1 | -1 = selected === match.grade ? 1 : -1;
+    void persistFeedback(impliedVote, selected);
+  };
+
+  const selectId = `verdict-${runId ?? 'live'}-${match.jd}-${rank}`;
+
   return (
-    <motion.article
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, delay: Math.min(rank * 0.05, 0.3) }}
-      className="bg-white rounded-2xl border border-secondary-200 shadow-soft overflow-hidden"
+    <article
+      data-result-card
+      className={`bento-card ${
+        rank === 1 ? 'bento-card--highlight' : ''
+      } p-5 sm:p-6 space-y-5`}
     >
       {/* Card Header */}
-      <div className="p-5 sm:p-6 border-b border-secondary-100">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5 min-w-0">
-            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-lg bg-primary-50 border border-primary-200 text-primary-700 font-bold text-sm shrink-0">
-              #{rank}
-            </span>
-            <div className="min-w-0">
-              <h3 className="text-lg sm:text-xl font-bold text-secondary-900 break-words">
-                {match.title || 'Untitled Position'}
-              </h3>
-              <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-secondary-500">
-                <span className="font-mono bg-secondary-100 text-secondary-700 px-2 py-0.5 rounded">
-                  {match.jd}
-                </span>
-                <span>•</span>
-                <span>Retrieval rank #{match.retrieval_rank}</span>
-                <span>•</span>
-                <span>Rule score {match.rule_score.toFixed(1)}/100</span>
-              </div>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-hairline">
+        <div className="flex items-start gap-3.5 min-w-0">
+          <span
+            className={`inline-flex items-center justify-center min-w-[40px] h-[34px] px-2.5 rounded-ctrl border font-mono text-[13px] font-medium tabular-nums shrink-0 mt-0.5 ${
+              rank === 1
+                ? 'bg-accent-soft border-accent-line text-accent-text'
+                : 'bg-ground border-hairline-strong text-ink'
+            }`}
+          >
+            #{rank}
+          </span>
+          <div className="min-w-0 space-y-1.5">
+            <h3 className="text-[19px] sm:text-[21px] leading-[1.25] font-medium text-ink [overflow-wrap:anywhere] break-words">
+              {match.title || 'Untitled job posting'}
+            </h3>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] font-mono text-muted tabular-nums">
+              <span className="px-2 py-0.5 rounded bg-ground border border-hairline text-ink">
+                {match.jd}
+              </span>
+              <span>Retrieval #{match.retrieval_rank}</span>
+              <span aria-hidden="true">·</span>
+              <span>Rule {match.rule_score.toFixed(1)}/100</span>
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
-            <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${badgeClass}`}
+        <div className="flex items-center justify-between sm:justify-end gap-3.5 shrink-0">
+          <span
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-ctrl text-[13px] font-medium border ${badgeClass}`}
+          >
+            <GradeIcon className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>{match.grade}</span>
+          </span>
+          <FitScoreRing fit={match.fit} />
+        </div>
+      </div>
+
+      {/* Bento 2-Column Interior */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+        {/* Left: Explanation + Skills */}
+        <div className="xl:col-span-7 space-y-5 min-w-0">
+          {explanationBullets.length > 0 && (
+            <div className="space-y-2.5">
+              <h4 className="text-[14px] font-medium text-ink">
+                Why this job matched
+              </h4>
+              <ul className="space-y-2 text-[15px] text-body leading-relaxed">
+                {explanationBullets.map((line, idx) => {
+                  const isNotScoredLine = line.startsWith('Not scored');
+                  return (
+                    <li
+                      key={idx}
+                      className={`flex items-start gap-2.5 ${
+                        isNotScoredLine ? 'text-[13px] text-muted' : ''
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`mt-2 w-1.5 h-1.5 rounded-full shrink-0 ${
+                          isNotScoredLine ? 'bg-muted' : 'bg-accent'
+                        }`}
+                      />
+                      <span className="[overflow-wrap:anywhere] break-words">
+                        {line}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {/* Skill Alignment Bento Split */}
+          <div className="space-y-2.5">
+            <h4 className="text-[14px] font-medium text-ink">
+              Skill alignment
+            </h4>
+            {!hasAnySkills ? (
+              <p className="text-[14px] text-muted">
+                No explicit skill overlap recorded on this posting.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-panel bg-ground border border-hairline p-3.5 space-y-2.5 min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-[13px]">
+                    <span className="font-medium text-ink">Matched skills</span>
+                    <span className="font-mono text-[12px] px-1.5 py-0.5 rounded bg-good-bg text-good border border-good-line tabular-nums">
+                      {match.matched_skills.length}
+                    </span>
+                  </div>
+                  {match.matched_skills.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {match.matched_skills.map((skill, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center px-2.5 py-1 rounded text-[12px] font-medium bg-good-bg text-good border border-good-line max-w-full [overflow-wrap:anywhere] break-words"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[13px] text-muted">
+                      No listed skills matched directly.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-panel bg-ground border border-hairline p-3.5 space-y-2.5 min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-[13px]">
+                    <span className="font-medium text-ink">Missing skills</span>
+                    <span className="font-mono text-[12px] px-1.5 py-0.5 rounded bg-pot-bg text-pot border border-pot-line tabular-nums">
+                      {match.missing_skills.length}
+                    </span>
+                  </div>
+                  {match.missing_skills.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {match.missing_skills.map((skill, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center px-2.5 py-1 rounded text-[12px] font-medium bg-pot-bg text-pot border border-pot-line max-w-full [overflow-wrap:anywhere] break-words"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[13px] text-muted">
+                      No missing required skills flagged.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: 7-Dimension Rule Breakdown + Radar */}
+        <div className="xl:col-span-5 rounded-panel bg-ground border border-hairline p-4 space-y-3.5 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h4 className="text-[14px] font-medium text-ink">
+                Seven rule weights
+              </h4>
+              <p className="text-[12px] font-mono text-muted">
+                100 pt total · V3.1 scorer
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRadar((prev) => !prev)}
+              aria-expanded={showRadar}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-ctrl border border-hairline-strong bg-card text-[13px] font-medium text-ink hover:bg-surface transition-colors shrink-0"
             >
-              <GradeIcon className="w-4 h-4 shrink-0" />
-              <span>{match.grade}</span>
-            </span>
-            <FitScoreRing fit={match.fit} grade={match.grade} />
+              <span>{showRadar ? 'Hide radar' : 'Show radar'}</span>
+              {showRadar ? (
+                <ChevronUpIcon className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <ChevronDownIcon className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+
+          {showRadar && (
+            <SevenAxisRadar scores={match.scores} unscored={unscored} />
+          )}
+
+          <div className="space-y-2.5 pt-1">
+            {SCORE_DIMENSIONS.map((dim) => {
+              const isUnscored = unscored.has(dim);
+              const rawScore = match.scores[dim] ?? 0;
+              const weight = DIMENSION_WEIGHTS[dim];
+
+              return (
+                <div key={dim} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-[13px]">
+                    <span
+                      className={
+                        isUnscored ? 'text-muted' : 'text-ink font-medium'
+                      }
+                    >
+                      {DIMENSION_LABELS[dim]}{' '}
+                      <span className="font-mono text-[11px] text-muted">
+                        ({weight}w)
+                      </span>
+                    </span>
+                    {isUnscored ? (
+                      <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface text-muted border border-hairline">
+                        not scored
+                      </span>
+                    ) : (
+                      <span className="font-mono text-[12px] font-medium text-ink tabular-nums">
+                        {Math.round(rawScore)}/100
+                      </span>
+                    )}
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-surface overflow-hidden">
+                    {isUnscored ? (
+                      <div className="w-full h-full border-t border-dashed border-hairline-strong" />
+                    ) : (
+                      <div
+                        data-score-bar
+                        className="h-full rounded-full bar-brand origin-left"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, rawScore))}%`,
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* Card Body */}
-      <div className="p-5 sm:p-6 space-y-5">
-        {/* Plain-English Explanation Bullets */}
-        {explanationBullets.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-secondary-500">
-              Why this job matched
-            </h4>
-            <ul className="space-y-1.5 text-sm text-secondary-700">
-              {explanationBullets.map((line, idx) => {
-                const isNotScoredLine = line.startsWith('Not scored');
-                return (
-                  <li
-                    key={idx}
-                    className={`flex items-start gap-2 ${
-                      isNotScoredLine ? 'text-xs text-secondary-500 italic' : ''
-                    }`}
-                  >
-                    <span
-                      className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isNotScoredLine ? 'bg-secondary-400' : 'bg-primary-600'
-                      }`}
-                    />
-                    <span className="break-words">{line}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-
-        {/* Skill Chips */}
-        <div className="space-y-3">
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-secondary-500">
-            Skill Alignment
-          </h4>
-          {!hasAnySkills ? (
-            <p className="text-sm text-secondary-500 italic">
-              No skill overlap recorded
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-3.5 rounded-xl bg-success-50/50 border border-success-200/70">
-                <div className="text-xs font-semibold text-success-800 mb-2 flex items-center justify-between">
-                  <span>Has (Matched Skills)</span>
-                  <span className="px-1.5 py-0.5 rounded bg-success-100 text-success-900">
-                    {match.matched_skills.length}
-                  </span>
-                </div>
-                {match.matched_skills.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {match.matched_skills.map((skill, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-success-100 text-success-900 border border-success-200"
-                      >
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-secondary-500">
-                    None of the listed job skills were directly matched.
-                  </p>
-                )}
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-warning-50/50 border border-warning-200/70">
-                <div className="text-xs font-semibold text-warning-900 mb-2 flex items-center justify-between">
-                  <span>Missing Skills</span>
-                  <span className="px-1.5 py-0.5 rounded bg-warning-100 text-warning-900">
-                    {match.missing_skills.length}
-                  </span>
-                </div>
-                {match.missing_skills.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {match.missing_skills.map((skill, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-warning-100/80 text-warning-900 border border-warning-200"
-                      >
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-secondary-500">
-                    No missing required skills flagged.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 7-Dimension Radar Section (Expanded on #1 by default, toggleable on all cards) */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowRadar((prev) => !prev)}
-            aria-expanded={showRadar}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-700 hover:text-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded px-2 py-1 -ml-2"
-          >
-            {showRadar ? (
-              <ChevronUpIcon className="w-4 h-4" />
-            ) : (
-              <ChevronDownIcon className="w-4 h-4" />
-            )}
-            <span>
-              {showRadar
-                ? 'Hide 7-dimension radar chart'
-                : 'Show 7-dimension radar chart'}
-            </span>
-          </button>
-
-          {showRadar && (
-            <div className="mt-2">
-              <SevenAxisRadar scores={match.scores} unscored={unscored} />
-            </div>
-          )}
-        </div>
-
-        {/* Action toggles: Job Posting & Evidence */}
-        <div className="pt-2 border-t border-secondary-100 flex flex-wrap items-center gap-3">
-          {match.job_text && (
-            <button
-              type="button"
-              onClick={() => setShowJobText((prev) => !prev)}
-              aria-expanded={showJobText}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary-100 text-secondary-800 hover:bg-secondary-200 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-              <DocumentTextIcon className="w-4 h-4 text-secondary-600" />
-              <span>
-                {showJobText ? 'Hide job posting' : 'Read the job posting'}
-              </span>
-              {showJobText ? (
-                <ChevronUpIcon className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDownIcon className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
-
+      {/* Footer Actions: Literal Quotes, Job Text, and Feedback */}
+      <div className="pt-4 border-t border-hairline flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           {evidenceEntries.length > 0 && (
             <button
               type="button"
               onClick={() => setShowEvidence((prev) => !prev)}
               aria-expanded={showEvidence}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary-100 text-secondary-800 hover:bg-secondary-200 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="inline-flex items-center gap-2 min-h-[44px] px-3.5 rounded-ctrl border border-hairline-strong bg-ground text-[14px] font-medium text-ink hover:bg-surface transition-colors"
             >
-              <ChatBubbleBottomCenterTextIcon className="w-4 h-4 text-secondary-600" />
+              <ChatBubbleBottomCenterTextIcon
+                className="w-4 h-4 text-muted shrink-0"
+                aria-hidden="true"
+              />
               <span>
                 {showEvidence
-                  ? 'Hide extracted evidence'
-                  : `Evidence (${evidenceEntries.length})`}
+                  ? 'Hide literal quotes'
+                  : `Inspect literal quotes (${evidenceEntries.length})`}
               </span>
               {showEvidence ? (
-                <ChevronUpIcon className="w-3.5 h-3.5" />
+                <ChevronUpIcon
+                  className="w-4 h-4 text-muted"
+                  aria-hidden="true"
+                />
               ) : (
-                <ChevronDownIcon className="w-3.5 h-3.5" />
+                <ChevronDownIcon
+                  className="w-4 h-4 text-muted"
+                  aria-hidden="true"
+                />
+              )}
+            </button>
+          )}
+
+          {match.job_text && (
+            <button
+              type="button"
+              onClick={() => setShowJobText((prev) => !prev)}
+              aria-expanded={showJobText}
+              className="inline-flex items-center gap-2 min-h-[44px] px-3.5 rounded-ctrl border border-hairline-strong bg-ground text-[14px] font-medium text-ink hover:bg-surface transition-colors"
+            >
+              <DocumentTextIcon
+                className="w-4 h-4 text-muted shrink-0"
+                aria-hidden="true"
+              />
+              <span>
+                {showJobText ? 'Hide job posting' : 'Read job posting'}
+              </span>
+              {showJobText ? (
+                <ChevronUpIcon
+                  className="w-4 h-4 text-muted"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ChevronDownIcon
+                  className="w-4 h-4 text-muted"
+                  aria-hidden="true"
+                />
               )}
             </button>
           )}
         </div>
 
-        {/* Expandable Job Text */}
-        {showJobText && match.job_text && (
-          <div className="rounded-xl bg-secondary-900 text-secondary-100 p-4 text-xs leading-relaxed max-h-80 overflow-y-auto whitespace-pre-wrap font-mono">
-            {match.job_text}
-          </div>
-        )}
+        {/* Human Feedback Bar (/api/feedback) */}
+        {typeof runId === 'number' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={isSavingFeedback}
+              onClick={() => handleVoteClick(1)}
+              aria-pressed={vote === 1}
+              className={`inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-ctrl border text-[13px] font-medium transition-colors disabled:opacity-50 ${
+                vote === 1
+                  ? 'bg-good-bg text-good border-good-line'
+                  : 'bg-ground text-ink border-hairline-strong hover:bg-surface'
+              }`}
+            >
+              <HandThumbUpIcon
+                className="w-4 h-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span>Good match</span>
+            </button>
 
-        {/* Expandable Evidence */}
-        {showEvidence && evidenceEntries.length > 0 && (
-          <div className="rounded-xl bg-secondary-50 border border-secondary-200 p-4 space-y-3">
-            <h5 className="text-xs font-semibold uppercase tracking-wider text-secondary-600">
-              Supporting Quotes from CV & Job Posting
-            </h5>
-            <div className="space-y-2.5">
-              {evidenceEntries.map(([dim, quotes]) => (
-                <div key={dim} className="text-xs">
-                  <span className="font-semibold text-secondary-800 capitalize">
-                    {dim}:
-                  </span>
-                  <ul className="mt-1 space-y-1 pl-4 list-disc text-secondary-700">
-                    {quotes.map((q, qIdx) => (
-                      <li key={qIdx} className="break-words">
-                        {q}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+            <button
+              type="button"
+              disabled={isSavingFeedback}
+              onClick={() => handleVoteClick(-1)}
+              aria-pressed={vote === -1}
+              className={`inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-ctrl border text-[13px] font-medium transition-colors disabled:opacity-50 ${
+                vote === -1
+                  ? 'bg-bad-bg text-bad border-bad-line'
+                  : 'bg-ground text-ink border-hairline-strong hover:bg-surface'
+              }`}
+            >
+              <HandThumbDownIcon
+                className="w-4 h-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span>Bad match</span>
+            </button>
+
+            <div className="inline-flex items-center gap-2">
+              <label
+                htmlFor={selectId}
+                className="text-[13px] text-muted whitespace-nowrap"
+              >
+                Verdict
+              </label>
+              <select
+                id={selectId}
+                value={overrideGrade}
+                disabled={isSavingFeedback}
+                onChange={handleGradeChange}
+                className="min-h-[44px] px-2.5 rounded-ctrl border border-hairline-strong bg-ground text-[14px] text-ink disabled:opacity-50"
+              >
+                <option value="">Model grade</option>
+                <option value="Good Fit">Good Fit</option>
+                <option value="Potential Fit">Potential Fit</option>
+                <option value="No Fit">No Fit</option>
+              </select>
             </div>
+
+            {feedbackSavedFlag && (
+              <span
+                role="status"
+                className="font-mono text-[12px] text-good px-1"
+              >
+                Saved
+              </span>
+            )}
           </div>
         )}
       </div>
-    </motion.article>
+
+      {/* Expandable Literal Quotes Drawer */}
+      {showEvidence && evidenceEntries.length > 0 && (
+        <div className="rounded-panel bg-ground border border-hairline p-4 space-y-3">
+          <h5 className="text-[14px] font-medium text-ink">
+            Literal quotes from CV and job posting
+          </h5>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {evidenceEntries.map(([dim, quotes]) => (
+              <div
+                key={dim}
+                className="rounded-ctrl bg-card border border-hairline p-3 space-y-1.5 min-w-0"
+              >
+                <p className="text-[13px] font-mono font-medium text-ink capitalize">
+                  {dim}
+                </p>
+                <ul className="space-y-1 pl-4 list-disc text-[13px] text-body leading-relaxed">
+                  {quotes.map((q, qIdx) => (
+                    <li
+                      key={qIdx}
+                      className="[overflow-wrap:anywhere] break-words"
+                    >
+                      {q}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Expandable Job Posting Drawer */}
+      {showJobText && match.job_text && (
+        <div className="rounded-panel bg-ground border border-hairline p-4 space-y-2">
+          <h5 className="text-[14px] font-medium text-ink">
+            Full CareerViet job posting ({match.jd})
+          </h5>
+          <pre className="text-[13px] leading-relaxed text-body font-mono max-h-80 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words m-0">
+            {match.job_text}
+          </pre>
+        </div>
+      )}
+    </article>
   );
 };
 
 const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   result,
   onNewAnalysis,
+  onFeedbackSaved,
 }) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const matches = result.matches || [];
+  const skippedCount = result.skipped ? Object.keys(result.skipped).length : 0;
+
+  useGSAP(
+    () => {
+      if (!rootRef.current) return;
+      const mm = gsap.matchMedia();
+
+      mm.add(
+        MOTION_QUERIES,
+        (context) => {
+          if (!context.conditions?.canAnimate || !rootRef.current) return;
+
+          const snapInt = gsap.utils.snap(1);
+          const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+
+          tl.from('[data-result-card]', {
+            y: 16,
+            opacity: 0.85,
+            duration: 0.46,
+            stagger: 0.065,
+            clearProps: 'transform,opacity',
+          }).from(
+            '[data-score-bar]',
+            {
+              scaleX: 0,
+              transformOrigin: 'left center',
+              duration: 0.58,
+              stagger: 0.02,
+              ease: 'power2.out',
+              clearProps: 'transform',
+            },
+            0.16
+          );
+
+          const arcs = gsap.utils.toArray<SVGCircleElement>(
+            '[data-fit-ring-arc]',
+            rootRef.current
+          );
+          arcs.forEach((arc, i) => {
+            const circ = Number(arc.dataset.circumference || 163.36);
+            const targetOffset = Number(arc.dataset.targetOffset || 0);
+            tl.fromTo(
+              arc,
+              { strokeDashoffset: circ },
+              {
+                strokeDashoffset: targetOffset,
+                duration: 0.85,
+                ease: 'power3.out',
+              },
+              0.12 + i * 0.075
+            );
+          });
+
+          const nums = gsap.utils.toArray<HTMLElement>(
+            '[data-fit-number]',
+            rootRef.current
+          );
+          nums.forEach((numEl, i) => {
+            const target = Number(numEl.dataset.targetFit || 0);
+            const state = { val: 0 };
+            tl.to(
+              state,
+              {
+                val: target,
+                duration: 0.8,
+                ease: 'power2.out',
+                onUpdate: () => {
+                  numEl.textContent = String(snapInt(state.val));
+                },
+              },
+              0.12 + i * 0.075
+            );
+          });
+
+          requestAnimationFrame(() => {
+            ScrollTrigger.refresh();
+          });
+
+          return () => {
+            arcs.forEach((arc) => {
+              if (arc.dataset.targetOffset) {
+                arc.style.strokeDashoffset = arc.dataset.targetOffset;
+              }
+            });
+            nums.forEach((numEl) => {
+              if (numEl.dataset.targetFit) {
+                numEl.textContent = numEl.dataset.targetFit;
+              }
+            });
+          };
+        },
+        rootRef
+      );
+
+      return () => mm.revert();
+    },
+    {
+      scope: rootRef,
+      dependencies: [result.run_id, result.as_of, matches.length],
+      revertOnUpdate: true,
+    }
+  );
 
   return (
-    <div className="w-full max-w-5xl mx-auto space-y-6">
-      {/* Results Summary Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-white rounded-2xl border border-secondary-200 shadow-soft p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+    <div ref={rootRef} className="w-full space-y-5">
+      {/* Results Summary Bento Card */}
+      <div
+        data-result-card
+        className="bento-card bento-card--highlight p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
       >
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-primary-700 bg-primary-50 border border-primary-200 px-2.5 py-1 rounded-full">
-            <SparklesIcon className="w-3.5 h-3.5" />
-            <span>Ranked by {result.ranking_model}</span>
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-[12px] font-mono text-muted">
+            <span className="px-2 py-0.5 rounded bg-accent-soft text-accent-text border border-accent-line">
+              {result.ranking_model}
+            </span>
+            <span>as of {result.as_of}</span>
+            {typeof result.run_id === 'number' && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>run #{result.run_id}</span>
+              </>
+            )}
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold text-secondary-900">
+          <h2 className="text-[22px] sm:text-[26px] leading-[1.2] text-ink">
             {matches.length} best of {result.pool} candidate jobs ·{' '}
-            {result.seconds.toFixed(1)} s
+            <span className="font-mono tabular-nums">
+              {result.seconds.toFixed(1)} s
+            </span>
           </h2>
-          <p className="text-xs sm:text-sm text-secondary-600">
-            Candidate pool retrieved via hybrid BGE-M3 + BM25 search and scored
-            as of <span className="font-mono">{result.as_of}</span>.
-          </p>
+          {skippedCount > 0 && (
+            <p className="text-[13px] text-pot">
+              {skippedCount} candidate posting{skippedCount === 1 ? '' : 's'}{' '}
+              skipped during scoring due to incomplete job schema.
+            </p>
+          )}
         </div>
 
         {onNewAnalysis && (
           <button
             type="button"
             onClick={onNewAnalysis}
-            className="btn-secondary inline-flex items-center justify-center gap-2 text-sm shrink-0 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="btn-secondary shrink-0 w-full sm:w-auto"
           >
-            <ArrowPathIcon className="w-4 h-4" />
-            <span>Match Another CV</span>
+            <ArrowPathIcon className="w-4 h-4" aria-hidden="true" />
+            <span>Match another CV</span>
           </button>
         )}
-      </motion.div>
+      </div>
 
       {/* Ranked Job Cards */}
       {matches.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-secondary-200 p-8 text-center space-y-3">
-          <p className="text-base font-medium text-secondary-800">
+        <div
+          data-result-card
+          className="bento-card p-8 text-center space-y-2"
+        >
+          <p className="text-[17px] font-medium text-ink">
             No matching jobs were returned for this CV.
           </p>
-          <p className="text-sm text-secondary-500">
-            Try uploading a more detailed CV or increasing the number of
-            returned jobs.
+          <p className="text-[15px] text-muted">
+            Upload a fuller CV or increase the number of returned jobs.
           </p>
         </div>
       ) : (
         <div className="space-y-5">
           {matches.map((match, index) => (
             <JobMatchCard
-              key={`${match.jd}-${index}`}
+              key={`${result.run_id ?? result.as_of}-${match.jd}-${index}`}
               match={match}
               rank={index + 1}
+              runId={result.run_id}
+              initialFeedback={result.feedback?.[match.jd]}
+              onFeedbackSaved={onFeedbackSaved}
             />
           ))}
         </div>

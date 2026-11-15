@@ -1,32 +1,186 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useId } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { motion } from 'framer-motion';
 import {
   Bars3Icon,
   XMarkIcon,
-  DocumentTextIcon,
-  SparklesIcon,
+  SunIcon,
+  MoonIcon,
+  ArrowRightIcon,
 } from '@heroicons/react/24/outline';
 import { getHealth, HealthResponse } from '../services/api';
 
 type HealthState = 'loading' | 'ok' | 'degraded' | 'offline';
 
+const NAVIGATION = [
+  { name: 'Overview', href: '/' },
+  { name: 'Matcher', href: '/analyze' },
+  { name: 'Architecture', href: '/about' },
+  { name: 'Guide', href: '/help' },
+];
+
+export const BentoLogoMark: React.FC<{ className?: string }> = ({
+  className = 'w-7 h-7',
+}) => {
+  const rawId = useId();
+  const gradId = `bento-logo-${rawId.replace(/:/g, '')}`;
+  return (
+    <svg
+      viewBox="0 0 32 32"
+      fill="none"
+      aria-hidden="true"
+      className={className}
+    >
+      <defs>
+        <linearGradient
+          id={gradId}
+          x1="19"
+          y1="6"
+          x2="26"
+          y2="15"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0%" stopColor="var(--ring-stop-1)" />
+          <stop offset="100%" stopColor="var(--ring-stop-3)" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="8" fill="var(--ink)" />
+      <rect x="6" y="6" width="11" height="9" rx="2.5" fill="var(--bg)" />
+      <rect x="19" y="6" width="7" height="9" rx="2.5" fill={`url(#${gradId})`} />
+      <rect
+        x="6"
+        y="17"
+        width="7"
+        height="9"
+        rx="2.5"
+        fill="var(--bg)"
+        fillOpacity="0.58"
+      />
+      <rect x="15" y="17" width="11" height="9" rx="2.5" fill="var(--bg)" />
+    </svg>
+  );
+};
+
 const Header: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isScrolled, setIsScrolled] = useState(false);
+  const [isDark, setIsDark] = useState(false);
   const [healthState, setHealthState] = useState<HealthState>('loading');
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const router = useRouter();
 
+  const topBarRef = useRef<HTMLDivElement | null>(null);
+  const menuToggleRef = useRef<HTMLButtonElement | null>(null);
+  const mobileSheetRef = useRef<HTMLDivElement | null>(null);
+  const dialogCloseRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 10);
+    const syncTheme = () => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const closeMenu = useCallback((restoreFocus = false) => {
+    setIsMenuOpen(false);
+    if (restoreFocus) {
+      requestAnimationFrame(() => {
+        menuToggleRef.current?.focus();
+      });
+    }
+  }, []);
+
+  // Close mobile menu automatically on client route changes
+  useEffect(() => {
+    const handleRouteDone = () => setIsMenuOpen(false);
+    router.events.on('routeChangeComplete', handleRouteDone);
+    return () => {
+      router.events.off('routeChangeComplete', handleRouteDone);
+    };
+  }, [router.events]);
+
+  // Modal focus containment strictly inside role="dialog", background inertness, and lg resize auto-close
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const desktopMq = window.matchMedia('(min-width: 1024px)');
+    if (desktopMq.matches) {
+      setIsMenuOpen(false);
+      return;
+    }
+
+    const onBreakpointChange = (ev: MediaQueryListEvent) => {
+      if (ev.matches) {
+        setIsMenuOpen(false);
+      }
+    };
+    desktopMq.addEventListener('change', onBreakpointChange);
+
+    const backgroundNodes: HTMLElement[] = [
+      ...Array.from(document.querySelectorAll<HTMLElement>('main, footer')),
+      ...(topBarRef.current ? [topBarRef.current] : []),
+    ];
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    for (const el of backgroundNodes) {
+      el.setAttribute('inert', '');
+      el.setAttribute('aria-hidden', 'true');
+    }
+
+    dialogCloseRef.current?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeMenu(true);
+        return;
+      }
+
+      if (e.key === 'Tab' && mobileSheetRef.current) {
+        const focusables = Array.from(
+          mobileSheetRef.current.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => el.offsetParent !== null);
+
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+
+        if (
+          e.shiftKey &&
+          (active === first || !mobileSheetRef.current.contains(active))
+        ) {
+          e.preventDefault();
+          last.focus();
+        } else if (
+          !e.shiftKey &&
+          (active === last || !mobileSheetRef.current.contains(active))
+        ) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      desktopMq.removeEventListener('change', onBreakpointChange);
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevOverflow;
+      for (const el of backgroundNodes) {
+        el.removeAttribute('inert');
+        el.removeAttribute('aria-hidden');
+      }
+    };
+  }, [isMenuOpen, closeMenu]);
 
   useEffect(() => {
     let mounted = true;
@@ -34,11 +188,7 @@ const Header: React.FC = () => {
       .then((data) => {
         if (!mounted) return;
         setHealthData(data);
-        if (data.status === 'ok') {
-          setHealthState('ok');
-        } else {
-          setHealthState('degraded');
-        }
+        setHealthState(data.status === 'ok' ? 'ok' : 'degraded');
       })
       .catch(() => {
         if (!mounted) return;
@@ -49,37 +199,45 @@ const Header: React.FC = () => {
     };
   }, []);
 
-  const navigation = [
-    { name: 'Home', href: '/' },
-    { name: 'Match CV', href: '/analyze' },
-    { name: 'About', href: '/about' },
-    { name: 'Help', href: '/help' },
-  ];
+  const toggleTheme = () => {
+    const nextDark = !document.documentElement.classList.contains('dark');
+    document.documentElement.classList.toggle('dark', nextDark);
+    setIsDark(nextDark);
+    try {
+      localStorage.setItem('resumatch-theme', nextDark ? 'dark' : 'light');
+    } catch {
+      // Ignore storage errors in restricted contexts
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute('content', nextDark ? '#070d1a' : '#f4f7fc');
+    }
+  };
 
   const isActive = (path: string) => router.pathname === path;
 
-  const renderHealthPill = () => {
+  const renderHealthStatus = () => {
     if (healthState === 'loading') {
       return (
         <div
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary-100 text-secondary-700 border border-secondary-200"
           role="status"
+          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-ctrl border border-hairline bg-ground text-[13px] font-mono text-muted"
         >
-          <span className="w-2 h-2 rounded-full bg-secondary-400 animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-muted" />
           <span>Checking API…</span>
         </div>
       );
     }
 
     if (healthState === 'ok') {
-      const jobCount = healthData?.jobs ?? 361;
+      const jobs = healthData?.jobs ?? 361;
       return (
         <div
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-success-50 text-success-800 border border-success-200"
           role="status"
+          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-ctrl border border-good-line bg-good-bg text-[13px] font-mono text-good"
         >
-          <span className="w-2 h-2 rounded-full bg-success-600" />
-          <span>{jobCount} jobs ready</span>
+          <span className="w-2 h-2 rounded-full bg-good" />
+          <span>{jobs} jobs · Qwen up</span>
         </div>
       );
     }
@@ -87,146 +245,211 @@ const Header: React.FC = () => {
     if (healthState === 'degraded') {
       return (
         <div
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-warning-50 text-warning-800 border border-warning-200"
           role="status"
+          title="Matching unavailable while Ollama is stopped; saved runs remain available."
+          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-ctrl border border-pot-line bg-pot-bg text-[13px] font-mono text-pot"
         >
-          <span className="w-2 h-2 rounded-full bg-warning-600" />
-          <span>Extractor offline — cached CVs only</span>
+          <span className="w-2 h-2 rounded-full bg-pot" />
+          <span>Matching unavailable · saved runs ok</span>
         </div>
       );
     }
 
     return (
       <div
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-error-50 text-error-800 border border-error-200"
         role="status"
+        className="inline-flex items-center gap-2 px-2.5 py-1 rounded-ctrl border border-bad-line bg-bad-bg text-[13px] font-mono text-bad"
       >
-        <span className="w-2 h-2 rounded-full bg-error-600" />
+        <span className="w-2 h-2 rounded-full bg-bad" />
         <span>API offline</span>
       </div>
     );
   };
 
   return (
-    <header
-      className={`fixed w-full z-50 transition-all duration-300 ${
-        isScrolled
-          ? 'bg-white/95 backdrop-blur-md shadow-soft border-b border-secondary-100'
-          : 'bg-transparent'
-      }`}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center py-4 gap-3">
-          {/* Logo */}
-          <Link
-            href="/"
-            className="flex items-center space-x-2 group focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-lg"
-          >
-            <div className="relative">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-accent-600 rounded-xl flex items-center justify-center transform group-hover:scale-105 transition-transform duration-200">
-                <DocumentTextIcon className="w-6 h-6 text-white" />
-              </div>
-              <SparklesIcon className="w-4 h-4 text-accent-500 absolute -top-1 -right-1 animate-bounce-subtle" />
-            </div>
-            <div>
-              <span className="text-xl font-bold gradient-text">ResuMatch</span>
-              <span className="block text-xs text-secondary-500 -mt-1">
-                CareerViet Matcher
-              </span>
-            </div>
-          </Link>
+    <header className="fixed top-0 inset-x-0 z-40 h-[56px] sm:h-[72px] bg-card border-b border-hairline">
+      <div
+        ref={topBarRef}
+        className="wrap relative h-full flex items-center justify-between gap-3"
+      >
+        <a href="#main-content" className="skip-link">
+          Skip to content
+        </a>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-6">
-            {navigation.map((item) => (
+        {/* Brand */}
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2.5 min-h-[44px] rounded-ctrl pr-1 text-ink no-underline min-w-0"
+        >
+          <BentoLogoMark className="w-7 h-7 shrink-0" />
+          <span className="text-[18px] sm:text-[20px] font-medium tracking-[-0.03em] text-ink truncate">
+            ResuMatch
+          </span>
+        </Link>
+
+        {/* Desktop Centre Nav */}
+        <nav
+          aria-label="Primary"
+          className="hidden lg:flex items-center gap-7"
+        >
+          {NAVIGATION.map((item) => {
+            const active = isActive(item.href);
+            return (
               <Link
-                key={item.name}
+                key={item.href}
                 href={item.href}
-                className={`relative px-3 py-2 text-sm font-medium transition-colors duration-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                  isActive(item.href)
-                    ? 'text-primary-600'
-                    : 'text-secondary-600 hover:text-secondary-900'
+                aria-current={active ? 'page' : undefined}
+                className={`relative inline-flex items-center min-h-[44px] text-[15px] font-medium whitespace-nowrap no-underline transition-colors ${
+                  active ? 'text-ink' : 'text-muted hover:text-ink'
                 }`}
               >
-                {item.name}
-                {isActive(item.href) && (
-                  <motion.div
-                    layoutId="activeTab"
-                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 rounded-full"
-                    initial={false}
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                <span>{item.name}</span>
+                {active && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute bottom-[6px] left-0 right-0 h-[2px] bar-brand rounded-full"
                   />
                 )}
               </Link>
-            ))}
-          </nav>
+            );
+          })}
+        </nav>
 
-          {/* Service Health Pill + CTA Button */}
-          <div className="hidden md:flex items-center space-x-3">
-            {renderHealthPill()}
-            <Link
-              href="/analyze"
-              className="btn-primary inline-flex items-center space-x-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-              <SparklesIcon className="w-4 h-4" />
-              <span>Match CV</span>
+        {/* Actions */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="hidden xl:block">{renderHealthStatus()}</div>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={
+              isDark ? 'Switch to light theme' : 'Switch to dark theme'
+            }
+            title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+            className="inline-flex items-center justify-center w-[44px] h-[44px] rounded-ctrl border border-hairline bg-ground text-ink hover:bg-surface transition-colors shrink-0"
+          >
+            {isDark ? (
+              <SunIcon className="w-5 h-5" aria-hidden="true" />
+            ) : (
+              <MoonIcon className="w-5 h-5" aria-hidden="true" />
+            )}
+          </button>
+
+          <div className="hidden sm:block">
+            <Link href="/analyze" className="btn-primary text-[15px] px-4">
+              <span>Upload a CV</span>
+              <ArrowRightIcon className="w-4 h-4 m-arrow" aria-hidden="true" />
             </Link>
           </div>
 
-          {/* Mobile menu button */}
           <button
+            ref={menuToggleRef}
             type="button"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            aria-label={isMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            onClick={() => setIsMenuOpen(true)}
+            aria-label="Open navigation menu"
             aria-expanded={isMenuOpen}
-            className="md:hidden p-2 rounded-lg text-secondary-600 hover:text-secondary-900 hover:bg-secondary-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-controls="mobile-nav-sheet"
+            className="lg:hidden inline-flex items-center justify-center w-[44px] h-[44px] rounded-ctrl border border-hairline bg-ground text-ink hover:bg-surface transition-colors shrink-0"
           >
-            {isMenuOpen ? (
-              <XMarkIcon className="w-6 h-6" />
-            ) : (
-              <Bars3Icon className="w-6 h-6" />
-            )}
+            <Bars3Icon className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
+      </div>
 
-        {/* Mobile Navigation */}
-        {isMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            className="md:hidden py-4 border-t border-secondary-200 bg-white/95 backdrop-blur-md rounded-b-xl px-2"
-          >
-            <div className="flex flex-col space-y-2">
-              <div className="px-3 py-1">{renderHealthPill()}</div>
-              {navigation.map((item) => (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  onClick={() => setIsMenuOpen(false)}
-                  className={`px-3 py-2 text-base font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                    isActive(item.href)
-                      ? 'text-primary-600 bg-primary-50'
-                      : 'text-secondary-600 hover:text-secondary-900 hover:bg-secondary-50'
-                  }`}
+      {/* Fullscreen Mobile / Tablet Modal Dialog (self-contained focus boundary) */}
+      {isMenuOpen && (
+        <div
+          id="mobile-nav-sheet"
+          ref={mobileSheetRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation menu"
+          className="lg:hidden fixed inset-0 bg-card overflow-y-auto z-50 flex flex-col"
+        >
+          <div className="h-[56px] sm:h-[72px] border-b border-hairline shrink-0">
+            <div className="wrap h-full flex items-center justify-between gap-3">
+              <Link
+                href="/"
+                onClick={() => closeMenu(false)}
+                className="inline-flex items-center gap-2.5 min-h-[44px] rounded-ctrl pr-1 text-ink no-underline min-w-0"
+              >
+                <BentoLogoMark className="w-7 h-7 shrink-0" />
+                <span className="text-[18px] sm:text-[20px] font-medium tracking-[-0.03em] text-ink truncate">
+                  ResuMatch
+                </span>
+              </Link>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  aria-label={
+                    isDark ? 'Switch to light theme' : 'Switch to dark theme'
+                  }
+                  className="inline-flex items-center justify-center w-[44px] h-[44px] rounded-ctrl border border-hairline bg-ground text-ink hover:bg-surface transition-colors"
                 >
-                  {item.name}
-                </Link>
-              ))}
-              <div className="pt-2 px-3">
-                <Link
-                  href="/analyze"
-                  onClick={() => setIsMenuOpen(false)}
-                  className="btn-primary w-full justify-center inline-flex items-center space-x-2 text-sm"
+                  {isDark ? (
+                    <SunIcon className="w-5 h-5" aria-hidden="true" />
+                  ) : (
+                    <MoonIcon className="w-5 h-5" aria-hidden="true" />
+                  )}
+                </button>
+
+                <button
+                  ref={dialogCloseRef}
+                  type="button"
+                  onClick={() => closeMenu(true)}
+                  aria-label="Close navigation menu"
+                  className="inline-flex items-center justify-center w-[44px] h-[44px] rounded-ctrl border border-hairline bg-ground text-ink hover:bg-surface transition-colors"
                 >
-                  <SparklesIcon className="w-4 h-4" />
-                  <span>Match CV</span>
-                </Link>
+                  <XMarkIcon className="w-5 h-5" aria-hidden="true" />
+                </button>
               </div>
             </div>
-          </motion.div>
-        )}
-      </div>
+          </div>
+
+          <div className="wrap py-6 flex-1 flex flex-col justify-between gap-6">
+            <nav aria-label="Mobile" className="divide-y divide-hairline">
+              {NAVIGATION.map((item) => {
+                const active = isActive(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => closeMenu(false)}
+                    className={`flex items-center justify-between min-h-[56px] text-[17px] font-medium no-underline ${
+                      active ? 'text-ink' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    <span>{item.name}</span>
+                    {active && (
+                      <span className="text-[13px] font-mono text-accent-text">
+                        Current
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </nav>
+
+            <div className="space-y-4 pb-4">
+              <div>{renderHealthStatus()}</div>
+              <Link
+                href="/analyze"
+                onClick={() => closeMenu(false)}
+                className="btn-primary w-full"
+              >
+                <span>Upload a CV</span>
+                <ArrowRightIcon
+                  className="w-4 h-4 m-arrow"
+                  aria-hidden="true"
+                />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };

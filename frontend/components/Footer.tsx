@@ -1,121 +1,159 @@
 import React from 'react';
 import Link from 'next/link';
-import {
-  DocumentTextIcon,
-  SparklesIcon,
-  CodeBracketIcon,
-} from '@heroicons/react/24/outline';
+import { ArrowRightIcon } from '@heroicons/react/24/outline';
+import { BentoLogoMark } from './Header';
 
-const Footer: React.FC = () => {
+interface FooterProps {
+  hideClosingCta?: boolean;
+}
+
+const Footer: React.FC<FooterProps> = ({ hideClosingCta = false }) => {
   const currentYear = new Date().getFullYear();
 
-  const footerLinks = {
-    navigation: [
-      { name: 'Home', href: '/' },
-      { name: 'Match Your CV', href: '/analyze' },
-      { name: 'How It Works', href: '/about' },
-      { name: 'Help & FAQ', href: '/help' },
-    ],
-    pipeline: [
-      { name: 'Qwen2.5-7B Extractor (QLoRA)', href: '/about#pipeline' },
-      { name: 'Hybrid BGE-M3 + BM25 Search', href: '/about#pipeline' },
-      { name: '7-Dimension Rule + Hybrid Scorer', href: '/about#scoring' },
-      { name: 'Troubleshooting Guide', href: '/help#faq' },
-    ],
-  };
-
   return (
-    <footer className="bg-secondary-900 text-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {/* Brand Section */}
-          <div className="lg:col-span-2">
+    <footer className="bg-surface border-t border-hairline mt-auto">
+      <div className="wrap py-12 sm:py-16 space-y-12">
+        {/* Row 1: Closing Action Card */}
+        {!hideClosingCta && (
+          <div className="bento-card bento-card--highlight p-6 sm:p-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="max-w-2xl space-y-2">
+              <h2 className="text-[28px] sm:text-[36px] leading-[1.14] text-ink">
+                Rank your CV against 361 CareerViet postings.
+              </h2>
+              <p className="text-[16px] text-body">
+                Run a PDF, DOCX, or TXT resume locally on one 12&nbsp;GB GPU and
+                inspect every dimension score and verbatim quote.
+              </p>
+            </div>
+            <div className="shrink-0">
+              <Link href="/analyze" className="btn-primary w-full sm:w-auto">
+                <span>Upload a CV</span>
+                <ArrowRightIcon
+                  className="w-4 h-4 m-arrow"
+                  aria-hidden="true"
+                />
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Row 2: Directory (44px tap targets on every link) */}
+        <div className="grid grid-cols-2 sm:grid-cols-12 gap-6 sm:gap-8">
+          <div className="col-span-2 sm:col-span-12 lg:col-span-6 space-y-3 min-w-0">
             <Link
               href="/"
-              className="inline-flex items-center space-x-2 group mb-4 focus:outline-none focus:ring-2 focus:ring-primary-400 rounded-lg"
+              className="inline-flex items-center gap-2.5 min-h-[44px] text-ink no-underline"
             >
-              <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-accent-500 rounded-xl flex items-center justify-center transform group-hover:scale-105 transition-transform duration-200">
-                  <DocumentTextIcon className="w-6 h-6 text-white" />
-                </div>
-                <SparklesIcon className="w-4 h-4 text-accent-400 absolute -top-1 -right-1" />
-              </div>
-              <div>
-                <span className="text-xl font-bold text-white">ResuMatch</span>
-                <span className="block text-xs text-secondary-400 -mt-1">
-                  CareerViet CV-to-Jobs Matcher
-                </span>
-              </div>
+              <BentoLogoMark className="w-7 h-7" />
+              <span className="text-[20px] font-medium tracking-[-0.03em] text-ink">
+                ResuMatch
+              </span>
             </Link>
-
-            <p className="text-secondary-300 text-sm mb-6 max-w-md leading-relaxed">
-              Upload your CV once to match against 361 CareerViet job postings.
-              Powered by a fine-tuned Qwen2.5-7B extractor with LangGraph
-              validate-repair-retry, hybrid BGE-M3 + BM25 retrieval, and
-              7-dimension explainable fit scoring.
+            <p className="text-[16px] text-muted max-w-[52ch] leading-relaxed">
+              Local CV-to-job matching pipeline for the CareerViet corpus:
+              QLoRA Qwen2.5-7B extraction, hybrid BGE-M3 and BM25 retrieval,
+              seven weighted V3.1 rules, and Qwen3-Embedding-4B ranking.
             </p>
           </div>
 
-          {/* Navigation Links */}
-          <div>
-            <h3 className="text-sm font-semibold text-white uppercase tracking-wider mb-4">
-              Navigation
-            </h3>
-            <ul className="space-y-3">
-              {footerLinks.navigation.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className="text-secondary-300 hover:text-white text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-400 rounded"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
+          <div className="col-span-1 sm:col-span-4 lg:col-span-3 space-y-1 min-w-0">
+            <h3 className="text-[15px] font-medium text-ink pb-1">Pages</h3>
+            <ul className="text-[15px]">
+              <li>
+                <Link
+                  href="/"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Overview
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/analyze"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Upload a CV
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/about"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Architecture
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/help"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Usage guide
+                </Link>
+              </li>
             </ul>
           </div>
 
-          {/* Pipeline Links */}
-          <div>
-            <h3 className="text-sm font-semibold text-white uppercase tracking-wider mb-4">
-              System Architecture
+          <div className="col-span-1 sm:col-span-4 lg:col-span-3 space-y-1 min-w-0">
+            <h3 className="text-[15px] font-medium text-ink pb-1">
+              Specification
             </h3>
-            <ul className="space-y-3">
-              {footerLinks.pipeline.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className="text-secondary-300 hover:text-white text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-400 rounded"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
+            <ul className="text-[15px]">
+              <li>
+                <Link
+                  href="/about#pipeline"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Four-stage pipeline
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/about#weights"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Seven rule weights
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/about#runtime"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  12 GB GPU runtime
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/help#faq"
+                  className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
+                >
+                  Common questions
+                </Link>
+              </li>
             </ul>
           </div>
         </div>
 
-        {/* Bottom Section */}
-        <div className="mt-10 pt-8 border-t border-secondary-800 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="text-secondary-400 text-sm">
-            © {currentYear} ATS CV-JD Matching Capstone (FA26AI45). Frontend adapted from ResuMatch (MIT, per its
-            README).
-          </div>
-
-          <div className="flex items-center space-x-2 text-secondary-400 text-sm">
-            <CodeBracketIcon className="w-4 h-4 text-primary-400" />
-            <span>
-              <a
-                href="https://github.com/gaurav-singh7092/ResuMatch"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary-400 hover:text-primary-300 underline focus:outline-none focus:ring-2 focus:ring-primary-400 rounded"
-              >
-                Based on ResuMatch
-              </a>{' '}
-              by Gaurav Singh
-            </span>
-          </div>
+        {/* Row 3: Legal & MIT Attribution (NOTICE.md) */}
+        <div className="pt-6 border-t border-hairline flex flex-col md:flex-row md:items-center justify-between gap-3 text-[13px] text-muted">
+          <p>
+            © {currentYear} ATS CV-JD Matching Capstone (FA26AI45). Local
+            inference via Ollama and FastAPI.
+          </p>
+          <p>
+            Frontend adapted from{' '}
+            <a
+              href="https://github.com/gaurav-singh7092/ResuMatch"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-link inline-flex items-center min-h-[44px] sm:min-h-0"
+            >
+              ResuMatch
+            </a>{' '}
+            by Gaurav Singh (MIT License, kept in{' '}
+            <span className="font-mono">frontend/NOTICE.md</span>).
+          </p>
         </div>
       </div>
     </footer>

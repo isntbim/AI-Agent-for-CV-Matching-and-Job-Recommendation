@@ -2,65 +2,529 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg: #f4f7fc;
+  --surface: #e9eff8;
+  --card: #ffffff;
+  --frag: #f7faff;
+  --ink: #0b1a33;
+  --text: #1c2b44;
+  --muted: #4a5a75;
+  --line: rgba(11, 26, 51, 0.12);
+  --line-strong: rgba(11, 26, 51, 0.24);
+
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3ebff;
+  --accent-text: #1e3a8a;
+  --accent-line: rgba(29, 78, 216, 0.26);
+  --focus: #1d4ed8;
+
+  --good: #166534;
+  --good-bg: #e3f4e9;
+  --good-line: rgba(22, 101, 52, 0.26);
+
+  --pot: #8a5308;
+  --pot-bg: #f8edd8;
+  --pot-line: rgba(138, 83, 8, 0.28);
+
+  --bad: #b42318;
+  --bad-bg: #fde8e6;
+  --bad-line: rgba(180, 35, 24, 0.28);
+
+  /* Brand & surface gradients ("cobalt to cyan") */
+  --grad-brand: linear-gradient(135deg, #1d4ed8 0%, #2563eb 45%, #0891b2 100%);
+  --grad-btn: linear-gradient(135deg, #1d4ed8 0%, #2563eb 46%, #0e7490 100%);
+  --grad-btn-hover: linear-gradient(135deg, #1e40af 0%, #1d4ed8 48%, #155e75 100%);
+  --grad-headline: linear-gradient(90deg, #1d4ed8 0%, #0e7490 100%);
+  --grad-hero-glow:
+    radial-gradient(52% 48% at 18% 12%, rgba(29, 78, 216, 0.13), transparent 66%),
+    radial-gradient(46% 44% at 84% 26%, rgba(8, 145, 178, 0.11), transparent 64%);
+  --grad-card-soft: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  --grad-card-highlight:
+    radial-gradient(at 15% 10%, #dbe7ff, transparent 60%),
+    radial-gradient(at 90% 90%, #cdf1f8, transparent 65%),
+    #eef4ff;
+
+  --ring-stop-1: #1d4ed8;
+  --ring-stop-2: #2563eb;
+  --ring-stop-3: #0891b2;
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  color-scheme: light;
+}
+
+html.dark {
+  --bg: #070d1a;
+  --surface: #0b1424;
+  --card: #0f1a2e;
+  --frag: #14223b;
+  --ink: #eef3fb;
+  --text: #d6dfee;
+  --muted: #9aabc6;
+  --line: rgba(214, 223, 238, 0.12);
+  --line-strong: rgba(214, 223, 238, 0.26);
+
+  --accent: #2563eb;
+  --accent-hover: #3b82f6;
+  --accent-ink: #ffffff;
+  --accent-soft: #12264d;
+  --accent-text: #8db8ff;
+  --accent-line: rgba(96, 165, 250, 0.34);
+  --focus: #60a5fa;
+
+  --good: #7fd8a4;
+  --good-bg: #10291c;
+  --good-line: rgba(127, 216, 164, 0.3);
+
+  --pot: #f0bf6e;
+  --pot-bg: #2c2110;
+  --pot-line: rgba(240, 191, 110, 0.28);
+
+  --bad: #f59a8e;
+  --bad-bg: #2f1714;
+  --bad-line: rgba(245, 154, 142, 0.28);
+
+  --grad-brand: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #0891b2 100%);
+  --grad-btn: linear-gradient(135deg, #1e3a8a 0%, #2563eb 52%, #0e7490 100%);
+  --grad-btn-hover: linear-gradient(135deg, #1d4ed8 0%, #2563eb 50%, #0891b2 100%);
+  --grad-headline: linear-gradient(90deg, #8db8ff 0%, #67e8f9 100%);
+  --grad-hero-glow:
+    radial-gradient(at 20% 0%, rgba(37, 99, 235, 0.35), transparent 55%),
+    radial-gradient(at 85% 30%, rgba(34, 211, 238, 0.18), transparent 50%);
+  --grad-card-soft:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.04) 0%, rgba(15, 26, 46, 0) 48%),
+    #0f1a2e;
+  --grad-card-highlight:
+    radial-gradient(at 20% 0%, rgba(37, 99, 235, 0.28), transparent 55%),
+    radial-gradient(at 85% 30%, rgba(34, 211, 238, 0.15), transparent 50%),
+    #0f1a2e;
+
+  --ring-stop-1: #60a5fa;
+  --ring-stop-2: #3b82f6;
+  --ring-stop-3: #22d3ee;
+
+  color-scheme: dark;
+}
+
 @layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   html {
-    scroll-behavior: smooth;
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    scroll-padding-top: 88px;
   }
-  
+
   body {
-    @apply bg-gray-50 text-gray-900;
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    overflow-x: clip;
   }
-  
-  /* Ensure proper spacing for fixed header */
-  .page-content {
-    @apply pt-20 md:pt-24;
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--ink);
+    font-weight: 500;
+    letter-spacing: -0.03em;
+  }
+
+  h1 {
+    letter-spacing: -0.038em;
+  }
+
+  /* Instant, high-contrast keyboard focus ring across every control */
+  :focus-visible {
+    outline: 2px solid var(--focus) !important;
+    outline-offset: 2px !important;
+    transition: none !important;
+  }
+
+  [id] {
+    scroll-margin-top: 88px;
   }
 }
 
 @layer components {
-  .btn-primary {
-    @apply inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all duration-200 transform hover:scale-105;
+  /* Equal left and right content edges across Header, Hero, Bento sections, and Footer */
+  .wrap {
+    width: min(100% - 48px, 1280px);
+    margin-inline: auto;
   }
-  
+
+  @media (min-width: 640px) {
+    .wrap {
+      width: min(100% - 96px, 1280px);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .wrap {
+      width: min(100% - 160px, 1280px);
+    }
+  }
+
+  /* Skip link aligned to .wrap's left edge; hidden above header until focused via Tab */
+  .skip-link {
+    position: absolute;
+    top: 6px;
+    left: 0;
+    z-index: 100;
+    padding: 10px 16px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    transform: translateY(-180%);
+  }
+
+  .skip-link:focus-visible {
+    transform: translateY(0);
+  }
+
+  /* Headline accent phrase gradient (used with restraint on 1 phrase per h1) */
+  .text-gradient {
+    background-image: var(--grad-headline);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  @media (forced-colors: active) {
+    .text-gradient {
+      background-image: none;
+      color: CanvasText;
+    }
+  }
+
+  /* Ambient hero glow backdrop (GPU-composited transform only when scrubbed) */
+  .hero-glow {
+    background-image: var(--grad-hero-glow);
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  /* Brand gradient fill for score & progress bars */
+  .bar-brand {
+    background-image: var(--grad-brand);
+  }
+
+  /* Bento card surface: soft directional wash on standard cards */
+  .bento-card {
+    background: var(--grad-card-soft);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    position: relative;
+  }
+
+  html.dark .bento-card {
+    box-shadow: inset 0 1px 0 rgba(214, 223, 238, 0.06);
+  }
+
+  /* Highlight Bento card (strictly 1-2 per page): richer cobalt-cyan wash + top brand rule */
+  .bento-card--highlight {
+    background: var(--grad-card-highlight);
+    border-color: var(--accent-line);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.8),
+      0 10px 28px rgba(11, 26, 51, 0.05);
+  }
+
+  .bento-card--highlight::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20px;
+    right: 20px;
+    height: 2px;
+    border-radius: 999px;
+    background-image: var(--grad-brand);
+    opacity: 0.9;
+    pointer-events: none;
+  }
+
+  html.dark .bento-card--highlight {
+    box-shadow:
+      inset 0 1px 0 rgba(214, 223, 238, 0.1),
+      0 14px 32px rgba(2, 6, 16, 0.45);
+  }
+
+  .bento-card-link {
+    transition:
+      transform 180ms var(--ease),
+      border-color 180ms var(--ease),
+      box-shadow 180ms var(--ease);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .bento-card-link:hover {
+      transform: translateY(-2px);
+      border-color: var(--line-strong);
+      box-shadow: 0 10px 24px rgba(11, 26, 51, 0.09);
+    }
+
+    html.dark .bento-card-link:hover {
+      border-color: var(--accent-line);
+      box-shadow:
+        inset 0 1px 0 rgba(214, 223, 238, 0.09),
+        0 12px 26px rgba(2, 6, 16, 0.48);
+    }
+  }
+
+  /* Four blue-family Bento panels behind UI fragments (cobalt / sky / ice / teal) */
+  .bento-panel {
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .bento-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(11, 26, 51, 0.1);
+    pointer-events: none;
+  }
+
+  html.dark .bento-panel::after {
+    border-color: rgba(214, 223, 238, 0.12);
+  }
+
+  .bento-panel--cobalt {
+    background: linear-gradient(135deg, #dbe7ff 0%, #bcd0fb 100%);
+  }
+
+  .bento-panel--sky {
+    background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+  }
+
+  .bento-panel--ice {
+    background: linear-gradient(135deg, #e8f1fb 0%, #cfe0f3 100%);
+  }
+
+  .bento-panel--teal {
+    background: linear-gradient(135deg, #d9f4f7 0%, #b5e6ee 100%);
+  }
+
+  html.dark .bento-panel--cobalt {
+    background: linear-gradient(135deg, #13254a 0%, #0f1a33 100%);
+  }
+
+  html.dark .bento-panel--sky {
+    background: linear-gradient(135deg, #0f2a3d 0%, #0b1d2c 100%);
+  }
+
+  html.dark .bento-panel--ice {
+    background: linear-gradient(135deg, #131f33 0%, #0e1726 100%);
+  }
+
+  html.dark .bento-panel--teal {
+    background: linear-gradient(135deg, #0f2b33 0%, #0a1f25 100%);
+  }
+
+  /* UI fragment sitting on a lit Bento panel */
+  .ui-frag {
+    background-color: var(--frag);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(11, 26, 51, 0.08);
+  }
+
+  html.dark .ui-frag {
+    box-shadow: 0 10px 24px rgba(2, 6, 16, 0.45);
+  }
+
+  /* One button pair across the entire site: inside @layer components so responsive display utilities win */
+  .btn-primary,
   .btn-secondary {
-    @apply inline-flex items-center justify-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all duration-200;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 10px 22px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-decoration: none;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color 160ms var(--ease),
+      border-color 160ms var(--ease),
+      box-shadow 160ms var(--ease),
+      color 160ms var(--ease),
+      filter 160ms var(--ease),
+      transform 150ms var(--ease);
   }
-  
-  .card {
-    @apply bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-xl;
+
+  .btn-primary {
+    background-color: var(--accent);
+    background-image: var(--grad-btn);
+    color: var(--accent-ink);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 4px 14px rgba(29, 78, 216, 0.22);
   }
-  
-  .card-gradient {
-    @apply bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg border border-gray-200 overflow-hidden transition-all duration-300 hover:shadow-xl;
+
+  html.dark .btn-primary {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 6px 18px rgba(7, 13, 26, 0.55);
   }
-  
-  .gradient-text {
-    @apply bg-gradient-to-r from-primary-600 to-purple-600 bg-clip-text text-transparent;
+
+  .btn-secondary {
+    background-color: var(--card);
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
   }
-  
-  .gradient-bg {
-    @apply bg-gradient-to-br from-primary-50 via-white to-purple-50;
+
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover:not(:disabled) {
+      background-image: var(--grad-btn-hover);
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.26),
+        0 8px 20px rgba(29, 78, 216, 0.28);
+    }
+
+    html.dark .btn-primary:hover:not(:disabled) {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        0 8px 22px rgba(37, 99, 235, 0.34);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background-color: var(--surface);
+      border-color: var(--ink);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:hover:not(:disabled) .m-arrow,
+    .btn-secondary:hover:not(:disabled) .m-arrow {
+      transform: translateX(3px);
+    }
   }
-  
-  .gradient-border {
-    @apply bg-gradient-to-r from-primary-500 to-purple-500 p-[1px] rounded-lg;
+
+  .btn-primary:active:not(:disabled),
+  .btn-secondary:active:not(:disabled) {
+    transform: translateY(1px) scale(0.985);
+    transition-duration: 90ms;
   }
-  
-  .glass-effect {
-    @apply bg-white/80 backdrop-blur-lg border border-white/20;
+
+  .btn-primary:disabled {
+    background-image: none;
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
+    border-color: var(--accent-line);
+    opacity: 1;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .m-arrow {
+    transition: transform 150ms var(--ease);
+  }
+
+  /* Drawn text underline for links */
+  .text-link {
+    color: var(--ink);
+    text-decoration: none;
+    background-image:
+      linear-gradient(var(--ink), var(--ink)),
+      linear-gradient(var(--line-strong), var(--line-strong));
+    background-size:
+      0% 1px,
+      100% 1px;
+    background-position:
+      0 100%,
+      0 100%;
+    background-repeat: no-repeat;
+    padding-bottom: 2px;
+    transition: background-size 150ms var(--ease);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .text-link:hover {
+      background-size:
+        100% 1px,
+        100% 1px;
+    }
+  }
+
+  /* Form controls: 46px height, 16px text so mobile browsers never auto-zoom */
+  .field-input {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background-color: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.45;
+    transition: border-color 140ms var(--ease);
+  }
+
+  .field-input::placeholder {
+    color: var(--muted);
+  }
+
+  .field-input:hover:not(:disabled) {
+    border-color: var(--ink);
   }
 }
 
-@layer utilities {
-  .animation-delay-200 {
-    animation-delay: 200ms;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
-  
-  .animation-delay-400 {
-    animation-delay: 400ms;
+
+  .hero-glow {
+    will-change: auto;
   }
-  
-  .animation-delay-600 {
-    animation-delay: 600ms;
+
+  .bento-card-link:hover,
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .btn-primary:active,
+  .btn-secondary:active {
+    transform: none !important;
   }
 }

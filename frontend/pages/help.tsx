@@ -1,149 +1,221 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowRightIcon } from '@heroicons/react/24/outline';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
-import {
-  QuestionMarkCircleIcon,
-  ChevronDownIcon,
-  DocumentTextIcon,
-  ClockIcon,
-  ChartBarIcon,
-  ExclamationTriangleIcon,
-  ArrowRightIcon,
-} from '@heroicons/react/24/outline';
+import { gsap, MOTION_QUERIES, useGSAP } from '../utils/gsap';
+
+const QUICK_SPECS = [
+  {
+    label: 'Accepted formats',
+    value: '.pdf, .docx, .txt',
+    detail:
+      'Up to 5 MB with at least 200 selectable characters of resume text.',
+    highlight: false,
+  },
+  {
+    label: 'First-run latency',
+    value: '20–60 s',
+    detail:
+      'Streams live Qwen2.5-7B tokens over SSE while extracting CV structure.',
+    highlight: false,
+  },
+  {
+    label: 'Cached latency',
+    value: '~0.9 s',
+    detail:
+      'Identical CV text + cutoff date hits the local SHA-256 extraction cache.',
+    highlight: false,
+  },
+  {
+    label: 'Corpus & ranker',
+    value: '361 jobs',
+    detail: 'Top 20 retrieved via BGE-M3 + BM25, reranked by hybrid_qwen_v1.',
+    highlight: true,
+  },
+];
+
+const FAQS = [
+  {
+    question: 'What file formats and sizes are accepted?',
+    answer:
+      'Upload text-based .pdf, Microsoft Word .docx, or plain-text .txt files up to 5 MB, or switch to Paste CV text and enter at least 200 characters directly. Scanned image-only PDFs contain no selectable text and are rejected with an explicit message.',
+  },
+  {
+    question: 'Why does a brand-new CV take 20 to 60 seconds?',
+    answer:
+      'Every new CV is parsed locally on a single 12 GB GPU by the QLoRA fine-tuned Qwen2.5-7B extractor and verified by a LangGraph repair loop. Once extracted, its structured JSON is cached on disk by SHA-256 hash and cutoff date, so repeat runs return in about one second.',
+  },
+  {
+    question: 'How is the 0–100 fit score calculated?',
+    answer:
+      'First, deterministic V3.1 rules score seven weighted dimensions: Skills (30), Title (20), Experience (15), Education (10), Industry (10), Location (8), and Salary (7). Then the hybrid_qwen_v1 ranker combines those rule scores with Qwen3-Embedding-4B whole-text cosine, job-title cosine, and corpus TF-IDF cosine.',
+  },
+  {
+    question: 'What does “not scored” mean on the breakdown or radar?',
+    answer:
+      'When a job posting or CV omits evidence for an axis (such as undisclosed salary or unspecified degree requirements), the scorer assigns a neutral value (50, or 75 for salary) and marks that dimension as not scored rather than guessing.',
+  },
+  {
+    question: 'What does “Experience up to” (as_of date) control?',
+    answer:
+      'Roles marked “Present” on a resume need a reference date to calculate total months of tenure. Changing Experience up to recomputes cumulative work experience as of that calendar date.',
+  },
+  {
+    question:
+      'What do “Matching unavailable · saved runs ok” or “API offline” in the header mean?',
+    answer:
+      '“361 jobs · Qwen up” means both FastAPI and Ollama are ready for live CV matching. “Matching unavailable · saved runs ok” means FastAPI is reachable on port 8000 while Ollama is stopped: new and cached CVs cannot rank because Ranker.scores() requests fresh Qwen3-Embedding-4B vectors on every match, while previously saved runs in Recent runs remain available from SQLite. “API offline” means the FastAPI server at 127.0.0.1:8000 is not running.',
+  },
+];
 
 const HelpPage: React.FC = () => {
-  const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const mainRef = useRef<HTMLElement | null>(null);
 
-  const faqs = [
-    {
-      question: 'What file formats and sizes are supported?',
-      answer:
-        'You can upload text-based PDF (.pdf), Microsoft Word (.docx), or plain text (.txt) files up to 5 MB. Alternatively, you can switch to the "Paste CV Text" tab on the Match CV page and paste at least 200 characters of resume text directly.',
-    },
-    {
-      question:
-        'Why was my PDF rejected with "fewer than 200 characters"?',
-      answer:
-        'If a PDF was created by scanning a paper document or exporting pages as images without an embedded text layer, the parser extracts fewer than 200 characters. Export your CV as a text-based PDF, DOCX, or TXT file—or copy and paste your resume text into the "Paste CV Text" tab.',
-    },
-    {
-      question:
-        'Why does a new CV take about 60–120 seconds on the first run, while repeat runs are much faster?',
-      answer:
-        'On the first upload of a new CV, our fine-tuned Qwen2.5-7B (QLoRA) model extracts structured V3.1 resume facts and runs the LangGraph validate-repair-retry loop on GPU, which takes roughly 60–120 seconds. Once extracted, the structured CV is cached on disk keyed by the SHA-256 hash of its text, so matching the same CV again (or changing the number of returned jobs) completes in a few seconds.',
-    },
-    {
-      question: 'What do the 7 scoring dimensions mean?',
-      answer:
-        'Every candidate job is evaluated on 7 axes: (1) Skills — overlap with required and optional JD skills including taxonomy relations; (2) Title — role family and seniority alignment; (3) Experience — years of relevant work experience; (4) Education — degree level and field of study; (5) Industry — domain overlap; (6) Location — city/country compatibility; and (7) Salary — compensation alignment.',
-    },
-    {
-      question:
-        'What does "Not scored" mean on the 7-dimension radar chart and explanation?',
-      answer:
-        'When either the CV or the job posting does not provide enough evidence to evaluate a dimension (for example, when neither document mentions salary or when location is unspecified), the backend substitutes a neutral internal value so the overall rule score is not unfairly penalized, and lists those axes under "Not scored (evidence missing or inconclusive, neutral value used)". On the radar chart and breakdown legend, those axes are drawn with dashed spokes and labelled "not scored" rather than shown as real scores.',
-    },
-    {
-      question:
-        'How are the top jobs selected from the 361 CareerViet job postings?',
-      answer:
-        'First, hybrid retrieval combining BGE-M3 dense embeddings and BM25 lexical search narrows the 361 CareerViet jobs down to the 20 closest candidate postings. Second, the hybrid_tfidf_v1 ranking model combines the 7-dimension V3.1 rule score with semantic and TF-IDF similarity to rank those 20 jobs and return your top 3, 5, or 10 matches.',
-    },
-    {
-      question:
-        'What does "Extractor offline — cached CVs only" in the header mean?',
-      answer:
-        'The header checks GET /api/health. When the local Ollama server hosting our fine-tuned Qwen2.5-7B extractor is running, the badge shows "361 jobs ready". If Ollama is not running, the badge shows "Extractor offline — cached CVs only": previously extracted CVs that are already in the SHA-256 cache will still match, while brand-new CVs require starting `ollama serve`.',
-    },
-  ];
+  useGSAP(
+    () => {
+      if (!mainRef.current) return;
+      const mm = gsap.matchMedia();
 
-  const quickTips = [
-    {
-      icon: DocumentTextIcon,
-      title: 'Use Selectable Text',
-      description:
-        'Upload a text-based PDF, DOCX, or TXT file (up to 5 MB) with at least 200 characters of text.',
+      mm.add(
+        MOTION_QUERIES,
+        (context) => {
+          if (!context.conditions?.canAnimate || !mainRef.current) return;
+
+          gsap.from('[data-help-hero]', {
+            y: 14,
+            opacity: 0,
+            duration: 0.45,
+            stagger: 0.055,
+            ease: 'power3.out',
+            clearProps: 'transform,opacity',
+          });
+
+          gsap.from('[data-spec-card]', {
+            y: 14,
+            opacity: 0.85,
+            immediateRender: false,
+            duration: 0.46,
+            stagger: 0.065,
+            ease: 'power3.out',
+            clearProps: 'transform,opacity',
+            scrollTrigger: {
+              trigger: '[data-spec-grid]',
+              start: 'top 88%',
+              once: true,
+            },
+          });
+
+          const faqCards = gsap.utils.toArray<HTMLElement>(
+            '[data-faq-card]',
+            mainRef.current
+          );
+          faqCards.forEach((card, idx) => {
+            gsap.from(card, {
+              y: 14,
+              opacity: 0.85,
+              immediateRender: false,
+              duration: 0.44,
+              delay: (idx % 2) * 0.06,
+              ease: 'power3.out',
+              clearProps: 'transform,opacity',
+              scrollTrigger: {
+                trigger: card,
+                start: 'top 90%',
+                once: true,
+              },
+            });
+          });
+        },
+        mainRef
+      );
+
+      return () => mm.revert();
     },
-    {
-      icon: ClockIcon,
-      title: 'SHA-256 Extraction Cache',
-      description:
-        'First-time extraction takes ~60–120 s on GPU. Repeat queries for the same CV text use the cached extraction.',
-    },
-    {
-      icon: ChartBarIcon,
-      title: 'Inspect All 7 Axes',
-      description:
-        'Expand the 7-dimension radar chart, matched/missing skill chips, and supporting quotes on each job card.',
-    },
-    {
-      icon: ExclamationTriangleIcon,
-      title: 'Check Service Status',
-      description:
-        'Verify the status badge in the top navigation bar to ensure both the FastAPI server and Qwen extractor are online.',
-    },
-  ];
+    { scope: mainRef }
+  );
 
   return (
     <>
       <Head>
-        <title>Help & FAQ - ResuMatch CareerViet Matcher</title>
+        <title>Usage guide — ResuMatch</title>
         <meta
           name="description"
-          content="Frequently asked questions about uploading CVs, Qwen2.5-7B extraction latency and SHA-256 caching, 7-dimension scoring, and unscored dimensions."
+          content="Usage guide and common questions for running ResuMatch locally: file requirements, SSE streaming latency, 7-dimension rule scores, and health statuses."
         />
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-secondary-50 flex flex-col">
+      <div className="min-h-screen flex flex-col bg-ground text-body">
         <Header />
 
-        <main className="flex-1 pt-24 pb-16">
-          {/* Hero Section */}
-          <section className="py-10">
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
+        <main
+          ref={mainRef}
+          id="main-content"
+          className="flex-1 pt-[84px] sm:pt-[108px] pb-16"
+        >
+          {/* Intro */}
+          <section className="pb-12 sm:pb-16">
+            <div className="wrap space-y-5">
+              <p
+                data-help-hero
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-soft border border-accent-line font-mono text-[13px] text-accent-text"
               >
-                <div className="inline-flex items-center space-x-2 bg-primary-100 text-primary-800 px-4 py-2 rounded-full text-sm font-medium mb-5">
-                  <QuestionMarkCircleIcon className="w-4 h-4" />
-                  <span>Usage Guide & Troubleshooting</span>
-                </div>
-
-                <h1 className="text-4xl md:text-5xl font-bold text-secondary-900 mb-4">
-                  Help & Frequently Asked Questions
-                </h1>
-
-                <p className="text-lg text-secondary-600 max-w-2xl mx-auto">
-                  Everything you need to know about uploading your CV, how the
-                  Qwen2.5-7B extractor and SHA-256 cache work, and how to read
-                  your 7-dimension match results.
-                </p>
-              </motion.div>
+                Documentation & troubleshooting
+              </p>
+              <h1
+                data-help-hero
+                className="text-[34px] sm:text-[46px] lg:text-[52px] leading-[1.08] text-ink max-w-3xl"
+              >
+                Usage guide and{' '}
+                <span className="text-gradient">common questions</span>
+              </h1>
+              <p
+                data-help-hero
+                className="text-[17px] leading-[1.55] text-body max-w-[58ch]"
+              >
+                Everything needed to prepare a resume, interpret the seven rule
+                weights and literal quotes, and diagnose local FastAPI or Ollama
+                health states.
+              </p>
+              <div data-help-hero className="pt-1">
+                <Link href="/analyze" className="btn-primary w-full sm:w-auto">
+                  <span>Upload a CV</span>
+                  <ArrowRightIcon
+                    className="w-4 h-4 m-arrow"
+                    aria-hidden="true"
+                  />
+                </Link>
+              </div>
             </div>
           </section>
 
-          {/* Quick Tips */}
-          <section className="py-8">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {quickTips.map((tip) => (
+          {/* Quick Reference Bento Strip */}
+          <section
+            aria-label="Quick specifications"
+            className="py-12 sm:py-16 border-t border-hairline"
+          >
+            <div className="wrap">
+              <div
+                data-spec-grid
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+              >
+                {QUICK_SPECS.map((spec) => (
                   <div
-                    key={tip.title}
-                    className="bg-white rounded-2xl p-6 border border-secondary-200 shadow-soft space-y-2.5"
+                    key={spec.label}
+                    data-spec-card
+                    className={`bento-card ${
+                      spec.highlight ? 'bento-card--highlight' : ''
+                    } p-6 flex flex-col justify-between gap-4`}
                   >
-                    <div className="w-10 h-10 rounded-xl bg-primary-50 border border-primary-200 flex items-center justify-center text-primary-600">
-                      <tip.icon className="w-5 h-5" />
+                    <div className="space-y-1">
+                      <p className="text-[13px] text-muted">{spec.label}</p>
+                      <p className="text-[24px] font-mono font-medium tracking-[-0.03em] text-ink">
+                        {spec.value}
+                      </p>
                     </div>
-                    <h2 className="text-base font-bold text-secondary-900">
-                      {tip.title}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-secondary-600 leading-relaxed">
-                      {tip.description}
+                    <p className="text-[14px] text-body leading-relaxed">
+                      {spec.detail}
                     </p>
                   </div>
                 ))}
@@ -151,61 +223,41 @@ const HelpPage: React.FC = () => {
             </div>
           </section>
 
-          {/* FAQ Accordion */}
-          <section id="faq" className="py-12">
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="space-y-4">
-                {faqs.map((faq, index) => {
-                  const isOpen = openFaq === index;
-                  return (
-                    <div
-                      key={faq.question}
-                      className="bg-white rounded-xl border border-secondary-200 shadow-soft overflow-hidden"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setOpenFaq(isOpen ? null : index)}
-                        aria-expanded={isOpen}
-                        className="w-full px-6 py-4 text-left flex items-center justify-between gap-4 hover:bg-secondary-50 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500"
-                      >
-                        <span className="font-semibold text-secondary-900 text-sm sm:text-base">
-                          {faq.question}
-                        </span>
-                        <ChevronDownIcon
-                          className={`w-5 h-5 text-secondary-500 shrink-0 transition-transform duration-200 ${
-                            isOpen ? 'rotate-180' : ''
-                          }`}
-                        />
-                      </button>
-
-                      <AnimatePresence initial={false}>
-                        {isOpen && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.25 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="px-6 pb-5 pt-1 text-sm text-secondary-600 leading-relaxed border-t border-secondary-100">
-                              {faq.answer}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
+          {/* Open FAQ Bento Grid (all answers visible at rest) */}
+          <section
+            id="faq"
+            aria-labelledby="faq-heading"
+            className="py-12 sm:py-16 border-t border-hairline"
+          >
+            <div className="wrap space-y-10">
+              <div className="max-w-2xl space-y-2">
+                <h2
+                  id="faq-heading"
+                  className="text-[26px] sm:text-[36px] leading-[1.14] text-ink"
+                >
+                  Common questions
+                </h2>
+                <p className="text-[16px] text-body">
+                  All answers are shown directly so you can scan requirements
+                  and scoring behavior in one read.
+                </p>
               </div>
 
-              <div className="mt-10 text-center">
-                <Link
-                  href="/analyze"
-                  className="btn-primary inline-flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  <span>Go to Match CV</span>
-                  <ArrowRightIcon className="w-4 h-4" />
-                </Link>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {FAQS.map((faq) => (
+                  <article
+                    key={faq.question}
+                    data-faq-card
+                    className="bento-card p-6 sm:p-8 space-y-3"
+                  >
+                    <h3 className="text-[18px] sm:text-[19px] leading-snug text-ink">
+                      {faq.question}
+                    </h3>
+                    <p className="text-[15px] text-body leading-relaxed">
+                      {faq.answer}
+                    </p>
+                  </article>
+                ))}
               </div>
             </div>
           </section>
