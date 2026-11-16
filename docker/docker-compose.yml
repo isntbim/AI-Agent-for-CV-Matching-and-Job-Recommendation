@@ -1,18 +1,21 @@
 # The demo stack, one container per service:
 #   frontend (Next.js, :3000) -> api (FastAPI + LangGraph, :8000, Swagger at /docs) -> ollama (GPU: qwen-v4 + qwen3-embedding)
-#                                                                                -> vectordb (pgvector: JD vectors)
-#                                                                                -> historydb (PostgreSQL: runs + feedback)
+#                                                                                -> PostgreSQL + pgvector (JD vectors, runs + feedback)
 #   prometheus (:9090) scrapes the API; grafana (:3001) shows the dashboard.
 #
-# Two ways to run it, from the repo root (images: docker compose -f docker/docker-compose.yml pull, or up --build):
+# Database: docker/.env sets VECTOR_DSN and HISTORY_DSN to a managed PostgreSQL with pgvector (the defence setup:
+# Azure capstonedb1, database cvmatch). Without them, add --profile local-db: vectordb and historydb run as containers.
+#
+# Two ways to run the GPU part, from the repo root (images: docker compose -f docker/docker-compose.yml pull, or up --build):
 #  a) GPU in the cloud (the defence setup; this machine needs no GPU): Ollama runs on a Runpod serverless endpoint
 #     (docker/ollama-serverless/). Put in docker/.env:  OLLAMA_URL=https://<endpoint-id>.api.runpod.ai
 #                                                       OLLAMA_API_KEY=<Runpod API key, restricted to that endpoint>
 #     docker compose -f docker/docker-compose.yml up -d
-#  b) Local GPU (Linux + NVIDIA container toolkit): MODELS_DIR=/path/to/models #     docker compose -f docker/docker-compose.yml --profile local-gpu up -d
+#  b) Local GPU (Linux + NVIDIA container toolkit): MODELS_DIR=/path/to/models
+#     docker compose -f docker/docker-compose.yml --profile local-gpu up -d
 #     MODELS_DIR holds qwen-v4-q4_K_M.gguf (scripts/qwen_build_ollama.py); ollama-init loads it into Ollama once.
 # The corpus, retrieval index and extraction cache are mounted from the host's output/ (git-ignored: personal data).
-# The databases are reachable only inside the stack; set PG_PASSWORD to change their password.
+# The local-db containers are reachable only inside the stack; set PG_PASSWORD to change their password.
 services:
   frontend:
     image: ghcr.io/isntbim/ai-agent-for-cv-matching-and-job-recommendation/frontend:latest
@@ -33,8 +36,9 @@ services:
     environment:
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
-      VECTOR_DSN: postgresql://postgres:${PG_PASSWORD:-cvmatch}@vectordb:5432/vectors
-      HISTORY_DSN: postgresql://postgres:${PG_PASSWORD:-cvmatch}@historydb:5432/history
+      # docker/.env can point both at a managed PostgreSQL (with pgvector) instead of the two containers below
+      VECTOR_DSN: ${VECTOR_DSN:-postgresql://postgres:${PG_PASSWORD:-cvmatch}@vectordb:5432/vectors}
+      HISTORY_DSN: ${HISTORY_DSN:-postgresql://postgres:${PG_PASSWORD:-cvmatch}@historydb:5432/history}
     ports:
       - "8000:8000"
     volumes:
@@ -48,8 +52,10 @@ services:
         required: false   # only with --profile local-gpu
       vectordb:
         condition: service_healthy
+        required: false   # only with --profile local-db
       historydb:
         condition: service_healthy
+        required: false
 
   ollama:
     image: ollama/ollama:0.40.14
@@ -91,6 +97,7 @@ services:
 
   vectordb:
     image: pgvector/pgvector:0.8.0-pg17
+    profiles: [local-db]
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-cvmatch}
       POSTGRES_DB: vectors
@@ -103,6 +110,7 @@ services:
 
   historydb:
     image: postgres:17.5-alpine
+    profiles: [local-db]
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-cvmatch}
       POSTGRES_DB: history
