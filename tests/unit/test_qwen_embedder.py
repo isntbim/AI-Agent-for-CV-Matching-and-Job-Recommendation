@@ -16,7 +16,7 @@ def test_query_gets_instruction_and_vectors_are_unit_length(monkeypatch):
         def json(self):
             return {"embeddings": [[3.0, 4.0]] * self.n}
 
-    def post(url, timeout, json):
+    def post(url, timeout, json, headers=None):
         sent.append(json)
         return Resp(len(json["input"]))
 

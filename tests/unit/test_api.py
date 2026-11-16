@@ -119,3 +119,18 @@ def test_txt_upload_and_index_page(client):
     r = client.post("/api/match", files={"file": ("cv.txt", CV.encode(), "text/plain")})
     assert r.status_code == 200 and client.calls[0][0] == CV
     assert "CV Match" in client.get("/").text
+
+
+def test_remote_ollama_is_never_polled(client, monkeypatch):
+    """With a serverless Ollama (OLLAMA_API_KEY set), health checks and metric scrapes must not wake a billed GPU worker."""
+    import httpx
+
+    from src.scoring.v4_client import ollama_headers
+    monkeypatch.setenv("OLLAMA_API_KEY", "rpa_test")
+    monkeypatch.setattr(svc, "corpus_ids", lambda: ["jd_001"])
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError(f"polled Ollama: {a}")))
+    assert client.get("/api/health").json()["extractor"].startswith("remote")
+    assert client.get("/metrics").status_code == 200
+    assert ollama_headers() == {"Authorization": "Bearer rpa_test"}
+    monkeypatch.delenv("OLLAMA_API_KEY")
+    assert ollama_headers() == {}

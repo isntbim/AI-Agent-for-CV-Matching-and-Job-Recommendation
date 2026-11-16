@@ -73,6 +73,8 @@ class ResourceCollector:
         yield g
         g = GaugeMetricFamily("ollama_model_vram_bytes", "VRAM held by each model loaded in Ollama", labels=["model"])
         try:
+            if os.environ.get("OLLAMA_API_KEY"):  # remote serverless Ollama: a scrape every 15 s would keep a GPU awake
+                raise ValueError
             for m in httpx.get(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434") + "/api/ps", timeout=1).json()["models"]:
                 g.add_metric([m["name"]], m.get("size_vram", 0))
         except (httpx.HTTPError, ValueError, KeyError):
@@ -148,6 +150,9 @@ def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict:
     import httpx
+    if os.environ.get("OLLAMA_API_KEY"):  # remote serverless Ollama: never wake (and bill) a GPU worker for a health poll
+        return {"status": "ok", "extractor": "remote (serverless, starts on first match)",
+                "jobs": len(svc.corpus_ids()), "ranking_model": "hybrid_qwen_v1"}
     try:
         ollama = httpx.get(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434") + "/api/version", timeout=2).status_code == 200
     except httpx.HTTPError:

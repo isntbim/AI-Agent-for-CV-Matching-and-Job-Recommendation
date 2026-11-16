@@ -35,6 +35,11 @@ class State(TypedDict, total=False):
     log: list[str]
 
 
+def ollama_headers() -> dict:
+    """Bearer auth for an Ollama behind a Runpod serverless endpoint (OLLAMA_API_KEY); none for a local Ollama."""
+    return {"Authorization": f"Bearer {key}"} if (key := os.environ.get("OLLAMA_API_KEY")) else {}
+
+
 class QwenV4:
     """V4 served by local Ollama (scripts/qwen_build_ollama.py). The prompt is built with the base Qwen chat template
     and sent raw, as in the vLLM evaluation; greedy, no schema-constrained decoding. Ollama's repeat_penalty over the
@@ -59,7 +64,7 @@ class QwenV4:
         text, used = "", 0
         for _ in range(MAX_CUTS + 1):
             cut, done, streamed = None, None, 0
-            with httpx.stream("POST", f"{self.url}/api/generate", timeout=self.timeout, json={
+            with httpx.stream("POST", f"{self.url}/api/generate", timeout=self.timeout, headers=ollama_headers(), json={
                     "model": self.model, "prompt": prompt + text, "raw": True, "stream": True,
                     "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": cap - used,
                                 "repeat_penalty": repetition_penalty, "repeat_last_n": 32768}}) as r:

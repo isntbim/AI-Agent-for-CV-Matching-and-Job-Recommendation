@@ -4,6 +4,8 @@ import os
 import numpy as np
 import requests
 
+from src.scoring.v4_client import ollama_headers
+
 MODEL = "qwen3-embedding:4b"  # Ollama tag, Q4_K_M
 NUM_CTX = 2048
 INSTRUCT = "Instruct: Given a candidate's resume, retrieve job descriptions that fit the candidate\nQuery: "
@@ -18,7 +20,7 @@ class QwenEmbedder:
         """Unit vectors. query=True adds the retrieval instruction (the CV side); documents and titles go in plain."""
         out = []
         for i in range(0, len(texts), batch):
-            r = requests.post(f"{self.url}/api/embed", timeout=self.timeout, json={
+            r = requests.post(f"{self.url}/api/embed", timeout=self.timeout, headers=ollama_headers(), json={
                 "model": MODEL, "input": [(INSTRUCT if query else "") + t for t in texts[i:i + batch]],
                 "truncate": True, "options": {"num_ctx": NUM_CTX}})
             r.raise_for_status()

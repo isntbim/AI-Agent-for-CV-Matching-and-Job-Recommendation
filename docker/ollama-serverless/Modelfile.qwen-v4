@@ -1,0 +1,6 @@
+# qwen-v4 for the serverless worker: same parameters as scripts/qwen_build_ollama.py, GGUF on the network volume.
+FROM /runpod-volume/models/qwen-v4-q4_K_M.gguf
+PARAMETER num_ctx 32768
+PARAMETER temperature 0
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>

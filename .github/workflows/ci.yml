@@ -58,6 +58,11 @@ jobs:
           IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')/api
           docker build -f docker/Dockerfile -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
           docker push --all-tags $IMAGE
+      - name: Build and push the serverless Ollama worker image
+        run: |
+          IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')/ollama-serverless
+          docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest docker/ollama-serverless
+          docker push --all-tags $IMAGE
       - name: Build and push the frontend image
         run: |
           IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')/frontend

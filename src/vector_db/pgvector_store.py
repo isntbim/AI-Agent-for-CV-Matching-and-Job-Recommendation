@@ -374,8 +374,10 @@ class PGVectorStore:
 
         with self._connect() as conn:
             with conn.cursor() as cur:
-                # an HNSW scan returns at most ef_search rows (default 40): widen it so top_k is always filled
-                cur.execute(f"SET LOCAL hnsw.ef_search = {max(100, 2 * int(top_k))}")
+                # an HNSW scan returns at most ef_search rows (default 40) and is approximate. ef_search at pgvector's
+                # maximum (1000) lets the scan visit every row of a table that small, so the search is exact.
+                # shortcut: exact only up to 1000 rows (the service has 361 JDs); a bigger corpus needs iterative scans
+                cur.execute("SET LOCAL hnsw.ef_search = 1000")
                 cur.execute(sql, params)
                 rows = cur.fetchall()
 
