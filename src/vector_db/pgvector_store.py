@@ -237,6 +237,9 @@ class PGVectorStore:
         from pgvector.psycopg import register_vector
 
         conn = psycopg.connect(self._conninfo)
+        # register_vector needs the type to exist: on a fresh database create_table's CREATE EXTENSION comes too late
+        conn.execute(_DDL_CREATE_EXTENSION)
+        conn.commit()
         register_vector(conn)
         return conn
 
