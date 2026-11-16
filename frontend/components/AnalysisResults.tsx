@@ -448,11 +448,23 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Left: Explanation + Skills */}
         <div className="xl:col-span-7 space-y-5 min-w-0">
-          {explanationBullets.length > 0 && (
+          {(match.summary || explanationBullets.length > 0) && (
             <div className="space-y-2.5">
               <h4 className="text-[14px] font-medium text-ink">
                 Why this job matched
               </h4>
+              {match.summary && (
+                <div className="space-y-1">
+                  <p className="text-[15px] text-body leading-relaxed [overflow-wrap:anywhere] break-words">
+                    {match.summary}
+                  </p>
+                  <p className="text-[12px] text-muted">
+                    {match.summary_source === 'o5'
+                      ? 'Written by the explanation model and checked against the scores.'
+                      : 'Standard summary: the text from the explanation model did not pass the fact check.'}
+                  </p>
+                </div>
+              )}
               <ul className="space-y-2 text-[15px] text-body leading-relaxed">
                 {explanationBullets.map((line, idx) => {
                   const isNotScoredLine = line.startsWith('Not scored');

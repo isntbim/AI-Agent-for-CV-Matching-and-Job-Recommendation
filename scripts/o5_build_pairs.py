@@ -121,12 +121,13 @@ def why_not_scored(dim: str, basis: str, sen, job, roles) -> str:
     return WHY_NOT_SCORED.get(basis, "there is not enough evidence")
 
 
-def facts(resume, job, result, grade: int, fit: float) -> dict:
-    """Everything the explanation may mention. Numbers are rounded the way the UI shows them."""
+def facts(resume, job, result, grade: int, fit: float, as_of=AS_OF) -> dict:
+    """Everything the explanation may mention. Numbers are rounded the way the UI shows them. The service passes the
+    request's as_of date (the latest CV title depends on it)."""
     d, bd, say = result.dimensions, result.skills_breakdown or {}, wording(resume, job)
     return details(resume, job, result) | {
         "verdict": GRADES[grade], "fit": round(fit), "rule_score": round(result.overall_score),
-        "job_title": job.document.title, "cv_title": _latest_title(resume, AS_OF) or next(
+        "job_title": job.document.title, "cv_title": _latest_title(resume, as_of) or next(
             (w.position for w in resume.document.work if w.position), None),
         "dimensions": {k: {"score": round(v.score), "scored": v.supported} for k, v in d.items()},
         "matched_skills": [say(x) for x in result.matched_skills[:12]], "missing_skills": [say(x) for x in result.missing_skills[:12]],

@@ -1,6 +1,8 @@
 """The service's V3.1 config and templated explanation."""
 from datetime import date
 
+import pytest
+
 from scripts.ats_service import GRADES, explain, v31_config
 from src.scoring.runtime_v3 import score_pair_v3
 from tests.unit.test_ats_scorer import inputs
@@ -101,3 +103,32 @@ def test_match_leaves_out_a_repeated_jd_text(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, "_jd_paths", lambda: {j: f"{j}.txt" for j in "abc"})
     out = svc.match("cv", "2026-11-08", jd_ids=["a", "b", "c"])
     assert sorted(out["skipped"]) == ["a", "b"]  # c repeats a's text
+
+
+O5_FACTS = {"verdict": "Potential Fit", "fit": 47, "matched_skills": ["Python"], "missing_skills": ["Docker"],
+            "dimensions": {d: {"score": 50, "scored": d == "skills"} for d in ("skills", "title", "experience",
+                                                                               "education", "industry")}}
+
+
+@pytest.mark.parametrize("outputs, expected_source, calls", [
+    (["good"], "o5", [1.0]),                         # passes the guard: shown as written
+    (["bad", "good"], "o5", [1.0, 1.1]),             # rejected once: regenerated with repetition penalty 1.1
+    (["bad", "bad"], "template", [1.0, 1.1]),        # rejected twice: the template, filled from the same facts
+    ([RuntimeError("explainer down")], "template", [1.0]),  # unreachable explainer never blocks the match
+])
+def test_o5_explain_guard_retry_then_template(monkeypatch, outputs, expected_source, calls):
+    import scripts.ats_service as svc
+    import scripts.o5_faithfulness as faith
+    seen = []
+
+    def generate(facts, vi, llm, penalty=1.0):
+        seen.append(penalty)
+        out = outputs[len(seen) - 1]
+        if isinstance(out, Exception):
+            raise out
+        return out
+    monkeypatch.setattr(svc, "_o5_generate", generate)
+    monkeypatch.setattr(faith, "violations", lambda text, facts: [] if text == "good" else ["number"])
+    text, source = svc.o5_explain(O5_FACTS, False, llm=None)
+    assert (source, seen) == (expected_source, calls)
+    assert text == "good" if source == "o5" else text.startswith("Potential Fit (fit 47/100): your CV shows Python.")

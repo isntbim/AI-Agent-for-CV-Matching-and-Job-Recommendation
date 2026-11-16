@@ -1,8 +1,8 @@
 """Web service: upload a CV (PDF, DOCX or TXT), get the best-fitting jobs from the CareerViet corpus, each with a fit
-score and a plain-English explanation. The pipeline is scripts/ats_service.match(): V4 extraction (local Ollama) ->
-hybrid retrieval -> Hybrid + TF-IDF ranking -> V3.1 explanation.
+score and an explanation in the CV's language. The pipeline is scripts/ats_service.match(): V4 extraction (Ollama) ->
+hybrid retrieval -> Hybrid + TF-IDF ranking -> O5 explanation of the V3.1 scores (fact-checked, template fallback).
 
-  uvicorn src.api.app:app --port 8000        # needs `ollama serve` with the qwen-v4 model; then open http://localhost:8000
+  uvicorn src.api.app:app --port 8000        # needs Ollama with qwen-v4, qwen-o5 and qwen3-embedding:4b
 """
 import asyncio
 import hashlib

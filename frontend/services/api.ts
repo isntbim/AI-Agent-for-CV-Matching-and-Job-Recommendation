@@ -63,6 +63,9 @@ export interface JobMatch {
   matched_skills: string[];
   missing_skills: string[];
   explanation: string[];
+  /** O5 explainer's paragraph (checked against the scores), or the fixed template when it failed the check. */
+  summary?: string;
+  summary_source?: 'o5' | 'template';
   evidence: Record<string, string[]>;
   job_text: string;
 }

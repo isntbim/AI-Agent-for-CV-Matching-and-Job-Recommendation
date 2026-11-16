@@ -1,0 +1,7 @@
+# qwen-o5 for the local-gpu profile: the O5 v3 explanation adapter merged into Qwen2.5-7B-Instruct, Q4_K_M
+# (scripts/qwen_build_ollama.py --name qwen-o5 --adapter output/o5v3/runs/qlora_r16_o5v3/adapter), GGUF in MODELS_DIR.
+FROM /models/qwen-o5-q4_k_m.gguf
+PARAMETER num_ctx 4096
+PARAMETER temperature 0
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>

@@ -1,5 +1,5 @@
 # The demo stack, one container per service:
-#   frontend (Next.js, :3000) -> api (FastAPI + LangGraph, :8000, Swagger at /docs) -> ollama (GPU: qwen-v4 + qwen3-embedding)
+#   frontend (Next.js, :3000) -> api (FastAPI + LangGraph, :8000, Swagger at /docs) -> ollama (GPU: qwen-v4, qwen-o5, qwen3-embedding)
 #                                                                                -> PostgreSQL + pgvector (JD vectors, runs + feedback)
 #   prometheus (:9090) scrapes the API; grafana (:3001) shows the dashboard.
 #
@@ -13,7 +13,8 @@
 #     docker compose -f docker/docker-compose.yml up -d
 #  b) Local GPU (Linux + NVIDIA container toolkit): MODELS_DIR=/path/to/models
 #     docker compose -f docker/docker-compose.yml --profile local-gpu up -d
-#     MODELS_DIR holds qwen-v4-q4_K_M.gguf (scripts/qwen_build_ollama.py); ollama-init loads it into Ollama once.
+#     MODELS_DIR holds qwen-v4-q4_K_M.gguf and qwen-o5-q4_k_m.gguf (scripts/qwen_build_ollama.py); ollama-init loads
+#     them into Ollama once.
 # The corpus, retrieval index and extraction cache are mounted from the host's output/ (git-ignored: personal data).
 # The local-db containers are reachable only inside the stack; set PG_PASSWORD to change their password.
 services:
@@ -86,10 +87,12 @@ services:
     volumes:
       - ${MODELS_DIR:-../models}:/models:ro
       - ./ollama/Modelfile.qwen-v4:/Modelfile.qwen-v4:ro
+      - ./ollama/Modelfile.qwen-o5:/Modelfile.qwen-o5:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
         (ollama show qwen-v4 > /dev/null 2>&1 || ollama create qwen-v4 -f /Modelfile.qwen-v4) &&
+        (ollama show qwen-o5 > /dev/null 2>&1 || ollama create qwen-o5 -f /Modelfile.qwen-o5) &&
         (ollama show qwen3-embedding:4b > /dev/null 2>&1 || ollama pull qwen3-embedding:4b)
     depends_on:
       ollama:

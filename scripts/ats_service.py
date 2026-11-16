@@ -1,5 +1,7 @@
 """One CV in, ranked and explained JDs out: V4 extraction (validate-repair-retry) -> hybrid retrieval of a pool ->
-the final ranking model reranks the pool -> templated explanation built only from the V3.1 scorer's result (no LLM).
+the final ranking model reranks the pool -> explanation of each returned match by the O5 adapter (Ollama model
+qwen-o5), written only from the V3.1 scorer's facts and checked by the faithfulness guard; a text that fails the guard
+twice is replaced by a fixed template filled from the same facts.
 
 Ranking = "Hybrid + TF-IDF (Qwen3)" (configs/hybrid_qwen_v1.json, written by scripts/match_ir_eval.py): logistic
 weights on the V3.1 dimensions, Qwen3-Embedding-4B whole-text and title cosines and TF-IDF cosine, fitted on the
@@ -39,6 +41,7 @@ RELATIONS = ROOT / "configs/skill_relations_near_v1.json"
 HYBRID = ROOT / "configs/hybrid_qwen_v1.json"
 JD_EMB = ROOT / "output/service/jd_emb_qwen3_embedding.npz"
 GRADES = ("No Fit", "Potential Fit", "Good Fit")
+O5_MODEL = os.environ.get("O5_MODEL", "qwen-o5")  # scripts/qwen_build_ollama.py --name qwen-o5 --adapter <O5 v3>
 
 
 def v31_config() -> ScorerConfig:
@@ -331,8 +334,18 @@ def service_graph():
                              "missing_skills": result.missing_skills,
                              "explanation": explain(result, grade, round(fit, 1), Ranker.why(contrib), vague_titles(resume)),
                              "evidence": {k: v.evidence[:3] for k, v in result.dimensions.items()
-                                          if v.supported and v.evidence}})
+                                          if v.supported and v.evidence}, "_o5": (job, result, grade, fit)})
         rows.sort(key=lambda r: (-r.pop("_logit"), r["retrieval_rank"]))
+        if rows:  # O5 writes the explanations of the returned matches only, in the CV's language
+            from scripts.o5_build_pairs import facts
+            from scripts.o5_faithfulness import is_vietnamese
+
+            llm, vi, as_of = _llm(), is_vietnamese(s["cv_text"]), date.fromisoformat(s["as_of"])
+            for row in rows[:s["top"]]:
+                job, result, grade, fit = row["_o5"]
+                row["summary"], row["summary_source"] = o5_explain(facts(resume, job, result, grade, fit, as_of), vi, llm)
+        for row in rows:
+            row.pop("_o5")
         return {"answer": {"as_of": s["as_of"], "retrieved": bool(s.get("retrieved")), "pool": len(s["jd_ids"]),
                            "matches": rows[:s["top"]], "skipped": s["skipped"], "ranking_model": "hybrid_qwen_v1"}}
 
@@ -346,6 +359,41 @@ def service_graph():
     g.add_edge("score", "rank")
     g.add_edge("rank", END)
     return g.compile()
+
+
+def _o5_generate(facts: dict, vi: bool, llm, penalty: float = 1.0) -> str:
+    """One O5 generation in the format the adapter was trained on: its system prompt + the facts rendered as plain
+    statements, Qwen chat template, greedy."""
+    import httpx
+
+    from scripts.o5_export_sft import SYSTEM, SYSTEM_VI, render
+    from src.scoring.v4_client import ollama_headers
+
+    prompt = llm.tok.apply_chat_template([{"role": "system", "content": SYSTEM_VI if vi else SYSTEM},
+                                          {"role": "user", "content": render(facts)}], tokenize=False, add_generation_prompt=True)
+    r = httpx.post(f"{llm.url}/api/generate", timeout=180, headers=ollama_headers(), json={
+        "model": O5_MODEL, "prompt": prompt, "raw": True, "stream": False,
+        "options": {"temperature": 0, "seed": 0, "num_ctx": 4096, "num_predict": 400, "repeat_penalty": penalty}})
+    r.raise_for_status()
+    return r.json()["response"].strip()
+
+
+def o5_explain(facts: dict, vi: bool, llm) -> tuple[str, str]:
+    """(text, source) for one match. scripts.o5_faithfulness.violations is the guard: a wrong verdict, number or skill,
+    a claim about an unscored dimension or a contradicted fact rejects the text. A rejected text is regenerated once with
+    repetition penalty 1.1 (greedy would repeat it), then the template is used, as it is when the explainer cannot be
+    reached: an explanation never blocks the match."""
+    from scripts.o5_export_sft import fallback
+    from scripts.o5_faithfulness import violations
+
+    for penalty in (1.0, 1.1):
+        try:
+            text = _o5_generate(facts, vi, llm, penalty)
+        except Exception:  # explainer down or slow: the template still states the facts
+            break
+        if text and not violations(text, facts):
+            return text, "o5"
+    return fallback(facts, vi), "template"
 
 
 def prepare_jds(workers: int = 1) -> None:
