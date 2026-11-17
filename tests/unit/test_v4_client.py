@@ -97,3 +97,20 @@ def test_stream_uses_eval_count_and_fails_on_errors(monkeypatch):
         fake_v4(monkeypatch, [{"response": "{}"}, {"error": "backend failed"}]).complete("s", user, 1.05)
     with pytest.raises(ExtractionError):
         fake_v4(monkeypatch, [{"response": "{}"}]).complete("s", user, 1.05)  # no completion message
+
+
+def test_context_budget_rejects_oversized_prompt_before_any_http_call(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(httpx, "stream", lambda *a, **k: (_ for _ in ()).throw(AssertionError("HTTP called")))
+    llm = v4_client.QwenV4.__new__(v4_client.QwenV4)
+    llm.model, llm.url, llm.timeout = "m", "u", 1
+    # prompt = 16,500 tokens, source = 5,000 tokens -> cap = 16,384 -> 16,500 + 16,384 = 32,884 > 32,768 (NUM_CTX)
+    llm.tok = type("T", (), {
+        "apply_chat_template": lambda self, *a, **k: "FULL_CHAT_PROMPT",
+        "__call__": lambda self, t: {"input_ids": [0] * (16500 if t == "FULL_CHAT_PROMPT" else 5000)},
+    })()
+
+    for kind in ("resume", "job"):
+        with pytest.raises(ExtractionError, match="(?i)input too long for the extractor context"):
+            call(V4Client(llm), kind=kind, text="long text")

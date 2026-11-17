@@ -40,12 +40,17 @@ def client(monkeypatch, tmp_path, history):
     monkeypatch.setattr(svc, "_llm", lambda: None)
     monkeypatch.setattr(svc, "_jd_paths", lambda: {"jd_001": "jd_001.txt"})
 
-    def fake_match(text, as_of, top, pool, ranker, on_step=None, on_token=None):
-        calls.append((text, as_of, top, ranker))
+    def fake_match(text, as_of, top, pool, ranker, on_step=None, on_token=None, jd_text=None):
+        calls.append((text, as_of, top, ranker) if jd_text is None else (text, as_of, top, ranker, jd_text))
         for t in '{"skills": [' * 4 if on_token else ():
             on_token(t)
-        for node in ("extract", "retrieve", "score", "rank") if on_step else ():
+        nodes = ("extract", "score", "rank") if jd_text is not None else ("extract", "retrieve", "score", "rank")
+        for node in nodes if on_step else ():
             on_step(node)
+        if jd_text is not None:
+            return {"as_of": as_of, "retrieved": False, "pool": 1, "skipped": {}, "ranking_model": "hybrid_qwen_v1",
+                    "matches": [{"jd": "pasted", "title": "Pasted Backend Role", "fit": 88.5, "grade": "Good Fit",
+                                 "job_text": jd_text}]}
         return {"as_of": as_of, "retrieved": True, "pool": 20, "skipped": {}, "ranking_model": "hybrid_qwen_v1",
                 "matches": [{"jd": "jd_001", "title": "Backend Developer", "fit": 81.0, "grade": "Good Fit"}]}
     monkeypatch.setattr(svc, "match", fake_match)
@@ -134,3 +139,84 @@ def test_remote_ollama_is_never_polled(client, monkeypatch):
     assert ollama_headers() == {"Authorization": "Bearer rpa_test"}
     monkeypatch.delenv("OLLAMA_API_KEY")
     assert ollama_headers() == {}
+
+
+def test_pasted_jd_validation_with_jobs_stream_and_history_reopen(client, monkeypatch):
+    import json
+    from fastapi import HTTPException
+    from src.api import app as app_mod
+    from src.parser.llm_extractor import ExtractionError
+
+    jd = ("We are hiring a Backend Python Engineer to design APIs with FastAPI, PostgreSQL, and Docker. " * 3).strip()
+
+    # Direct helper checks: inputs() validation (200..12000) and with_jobs() preservation / no KeyError
+    assert app_mod.inputs(None, CV, 5, "2026-11-04", "   \r\n\t  ")[2] is None
+    assert app_mod.inputs(None, CV, 5, "2026-11-04", f"  {jd}  ")[2] == jd
+    assert len(app_mod.inputs(None, CV, 5, "2026-11-04", "x" * 12000)[2]) == 12000
+    with pytest.raises(HTTPException) as short_exc:
+        app_mod.inputs(None, CV, 5, "2026-11-04", "x" * 199)
+    assert short_exc.value.status_code == 400
+    with pytest.raises(HTTPException) as long_exc:
+        app_mod.inputs(None, CV, 5, "2026-11-04", "x" * 12001)
+    assert long_exc.value.status_code == 400
+
+    preserved = app_mod.with_jobs({"matches": [
+        {"jd": "pasted", "job_text": "custom pasted posting"},
+        {"jd": "jd_001", "job_text": "already present"},
+        {"jd": "pasted"},
+    ]})
+    assert preserved["matches"][0]["job_text"] == "custom pasted posting"
+    assert preserved["matches"][1]["job_text"] == "already present"
+    assert "job_text" not in preserved["matches"][2]
+
+    # Route validation: too short / >12000 -> 400; blank -> corpus mode
+    assert client.post("/api/match", data={"text": CV, "jd_text": "too short"}).status_code == 400
+    assert client.post("/api/match/stream", data={"text": CV, "jd_text": "too short"}).status_code == 400
+    assert client.post("/api/match", data={"text": CV, "jd_text": "x" * 12001}).status_code == 400
+    assert client.calls == []
+
+    blank = client.post("/api/match", data={"text": CV, "as_of": "2026-11-04", "jd_text": "   "})
+    assert blank.status_code == 200 and blank.json()["matches"][0]["jd"] == "jd_001"
+
+    # Streamed pasted-JD match -> skips retrieve, saves job_text, reopens from /api/history/{run_id}, accepts feedback
+    r = client.post("/api/match/stream", data={"text": CV, "as_of": "2026-11-04", "jd_text": f"\r\n{jd}\r\n"})
+    assert r.status_code == 200
+    events = [(e.split("\n")[0].removeprefix("event: "), json.loads(e.split("\n")[1].removeprefix("data: ")))
+              for e in r.text.strip().split("\n\n")]
+    assert [d["step"] for k, d in events if k == "step"] == ["extract", "score", "rank"]
+    result = events[-1][1]
+    assert result["retrieved"] is False and result["matches"][0]["jd"] == "pasted"
+    assert result["matches"][0]["job_text"] == jd
+
+    run_id = result["run_id"]
+    reopened = client.get(f"/api/history/{run_id}").json()
+    assert reopened["matches"][0]["jd"] == "pasted" and reopened["matches"][0]["job_text"] == jd
+    assert client.get("/api/history").json()[0]["top"][0]["jd"] == "pasted"
+    assert client.post("/api/feedback", json={"run_id": run_id, "jd": "pasted", "vote": 1}).status_code == 200
+
+    # Addendum B: pasted-JD ExtractionError -> 422 JD-specific message on /api/match and SSE error event on /api/match/stream
+    def fail_jd_match(*args, **kwargs):
+        err = ExtractionError("JD context budget exceeded")
+        err.source = "jd"
+        raise err
+
+    monkeypatch.setattr(svc, "match", fail_jd_match)
+    sync_err = client.post("/api/match", data={"text": CV, "jd_text": jd})
+    assert sync_err.status_code == 422 and "job description could not be read reliably" in sync_err.json()["detail"].lower()
+
+    sse_err = client.post("/api/match/stream", data={"text": CV, "jd_text": jd})
+    assert sse_err.status_code == 200
+    err_events = [(e.split("\n")[0].removeprefix("event: "), json.loads(e.split("\n")[1].removeprefix("data: ")))
+                  for e in sse_err.text.strip().split("\n\n")]
+    assert err_events[-1][0] == "error" and err_events[-1][1]["status"] == 422
+    assert "job description could not be read reliably" in err_events[-1][1]["detail"].lower()
+
+    # CV ExtractionError during a pasted-JD request still reports the CV message
+    def fail_cv_match(*args, **kwargs):
+        err = ExtractionError("CV unreadable")
+        err.source = "cv"
+        raise err
+
+    monkeypatch.setattr(svc, "match", fail_cv_match)
+    cv_err = client.post("/api/match", data={"text": CV, "jd_text": jd})
+    assert cv_err.status_code == 422 and "cv could not be read reliably" in cv_err.json()["detail"].lower()

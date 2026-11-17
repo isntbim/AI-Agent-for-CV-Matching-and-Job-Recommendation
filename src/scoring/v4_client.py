@@ -13,6 +13,7 @@ from src.parser.llm_extractor import ExtractionError
 
 PENALTIES = (1.05, 1.1, 1.15, 1.2)  # first try = the evaluated setting; retries as on the V4 test set
 MAX_NEW_TOKENS = 16384  # same cap as generate.py; longest training answer is ~12k tokens
+NUM_CTX = 32768
 
 
 def token_cap(source_tokens: int) -> int:
@@ -60,14 +61,19 @@ class QwenV4:
 
         prompt = self.tok.apply_chat_template([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                               tokenize=False, add_generation_prompt=True)
+        prompt_tokens = len(self.tok(prompt)["input_ids"])
         cap = token_cap(len(self.tok(json.loads(user)["source_text"])["input_ids"]))
+        if prompt_tokens + cap > NUM_CTX:
+            raise ExtractionError(
+                f"Input too long for the extractor context ({prompt_tokens} prompt + {cap} output > {NUM_CTX} tokens)."
+            )
         text, used = "", 0
         for _ in range(MAX_CUTS + 1):
             cut, done, streamed = None, None, 0
             with httpx.stream("POST", f"{self.url}/api/generate", timeout=self.timeout, headers=ollama_headers(), json={
                     "model": self.model, "prompt": prompt + text, "raw": True, "stream": True,
-                    "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": cap - used,
-                                "repeat_penalty": repetition_penalty, "repeat_last_n": 32768}}) as r:
+                    "options": {"temperature": 0, "seed": 0, "num_ctx": NUM_CTX, "num_predict": cap - used,
+                                "repeat_penalty": repetition_penalty, "repeat_last_n": NUM_CTX}}) as r:
                 r.raise_for_status()
                 for line in r.iter_lines():
                     chunk = json.loads(line)

@@ -132,3 +132,102 @@ def test_o5_explain_guard_retry_then_template(monkeypatch, outputs, expected_sou
     text, source = svc.o5_explain(O5_FACTS, False, llm=None)
     assert (source, seen) == (expected_source, calls)
     assert text == "good" if source == "o5" else text.startswith("Potential Fit (fit 47/100): your CV shows Python.")
+
+
+def test_ranker_scores_pasted_jd_without_touching_jd_emb_cache(tmp_path, monkeypatch):
+    import math
+    import numpy as np
+    import scripts.ats_service as svc
+    import src.embeddings.qwen as qwen_mod
+
+    calls = []
+
+    class FakeEmbedder:
+        def encode(self, texts, query=False):
+            calls.append((list(texts), query))
+            vecs = []
+            for i, t in enumerate(texts, 1):
+                v = np.array([float(len(t) % 11 + 1), float(i + (3 if query else 1))], dtype=np.float32)
+                vecs.append(v / np.linalg.norm(v))
+            return np.vstack(vecs)
+
+    emb_file = tmp_path / "jd_emb.npz"
+    monkeypatch.setattr(svc, "JD_EMB", emb_file)
+    monkeypatch.setattr(qwen_mod, "QwenEmbedder", FakeEmbedder)
+
+    corpus = {
+        "jd_001": "Backend engineer experienced in Python, Django, REST APIs and PostgreSQL.",
+        "jd_002": "Frontend developer skilled in TypeScript, React, Next.js and Tailwind CSS.",
+    }
+    ranker = svc.Ranker(corpus)
+    saved_bytes = emb_file.read_bytes()
+    saved_vocab = dict(ranker.tfidf.vocabulary_)
+    calls.clear()
+
+    pasted_text = "Hiring a Senior Python Backend Engineer to build FastAPI and PostgreSQL microservices."
+    dims = {"skills": 80, "title": 100, "experience": 75, "education": 100, "industry": 100}
+    (logit,) = ranker.scores("Senior Python engineer with FastAPI and PostgreSQL", "Python Engineer",
+                             [("pasted", "Senior Python Backend Engineer", dims)], texts={"pasted": pasted_text})
+
+    assert math.isfinite(logit)
+    assert "pasted" not in ranker.jd_emb
+    assert emb_file.read_bytes() == saved_bytes
+    assert set(np.load(emb_file).files) == {"jd_001", "jd_002"}
+    assert ranker.tfidf.vocabulary_ == saved_vocab
+    assert ([pasted_text], False) in calls  # embedded on document side (query=False), like corpus JDs
+
+
+def test_full_graph_pasted_jd_runs_ranker_and_o5_and_reraises_jd_failure(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import numpy as np
+    import scripts.ats_service as svc
+    import src.embeddings.qwen as qwen_mod
+    from src.parser.llm_extractor import ExtractionError
+
+    cv, jd = inputs()
+
+    class FakeEmbedder:
+        def encode(self, texts, query=False):
+            vecs = []
+            for i, t in enumerate(texts, 1):
+                v = np.array([float(len(t) % 7 + 1), float(i + (2 if query else 1))], dtype=np.float32)
+                vecs.append(v / np.linalg.norm(v))
+            return np.vstack(vecs)
+
+    monkeypatch.setattr(svc, "JD_EMB", tmp_path / "jd_emb.npz")
+    monkeypatch.setattr(qwen_mod, "QwenEmbedder", FakeEmbedder)
+    real_ranker = svc.Ranker({
+        "jd_001": "Backend engineer with Python, Django, and PostgreSQL experience.",
+        "jd_002": "Frontend engineer with TypeScript, React, and Next.js experience.",
+    })
+
+    fail_jd = False
+
+    class Cache:
+        def get(self, text, kind):
+            if kind == "job" and fail_jd:
+                raise ExtractionError("exceeds conservative context budget")
+            return cv if kind == "resume" else jd
+
+    pasted_jd = "Senior Backend Developer role requiring Python, FastAPI, Docker, and SQL. " * 4
+    steps, o5_facts = [], []
+    monkeypatch.setattr(svc, "V4Client", lambda llm=None: None)
+    monkeypatch.setattr(svc, "_llm", lambda: SimpleNamespace())
+    monkeypatch.setattr(svc, "_cache", lambda *a, **k: Cache())
+    monkeypatch.setattr(svc, "retrieve", lambda *a, **k: (_ for _ in ()).throw(AssertionError("retrieve must not run")))
+    monkeypatch.setattr(svc, "o5_explain", lambda facts, vi, llm: (o5_facts.append(facts) or ("Checked O5 summary.", "o5")))
+
+    out = svc.match("Candidate CV with Python and SQL", "2024-01-01", top=5, ranker=real_ranker,
+                    on_step=steps.append, jd_text=pasted_jd)
+    assert steps == ["extract", "score", "rank"]
+    assert out["retrieved"] is False and out["pool"] == 1 and len(out["matches"]) == 1
+    match_row = out["matches"][0]
+    assert match_row["jd"] == "pasted" and match_row["job_text"] == pasted_jd
+    assert match_row["summary"] == "Checked O5 summary." and match_row["summary_source"] == "o5"
+    assert len(o5_facts) == 1 and o5_facts[0]["verdict"] in svc.GRADES and "dimensions" in o5_facts[0]
+
+    # Addendum B: pasted-JD extraction failure re-raises (marked source="jd") instead of becoming an empty run
+    fail_jd = True
+    with pytest.raises(ExtractionError) as exc_info:
+        svc.match("Candidate CV with Python and SQL", "2024-01-01", top=5, ranker=real_ranker, jd_text=pasted_jd)
+    assert getattr(exc_info.value, "source", None) == "jd"

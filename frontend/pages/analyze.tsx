@@ -46,6 +46,12 @@ const STEP_PROGRESS: Record<PipelineStep, number> = {
   rank: 0.94,
 };
 
+const PASTED_STEP_PROGRESS: Partial<Record<PipelineStep, number>> = {
+  extract: 0.3,
+  score: 0.66,
+  rank: 0.94,
+};
+
 function formatRunTimestamp(iso: string): string {
   if (!iso) return '';
   return iso.replace('T', ' ').slice(0, 16);
@@ -55,10 +61,13 @@ const AnalyzePage: React.FC = () => {
   const [inputMode, setInputMode] = useState<InputMode>('upload');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pastedText, setPastedText] = useState('');
+  const [pastedJd, setPastedJd] = useState('');
   const [topJobs, setTopJobs] = useState<number>(5);
   const [asOf, setAsOf] = useState<string>(() => todayIsoDate());
 
   const pageRef = useRef<HTMLElement | null>(null);
+  const jdCardRef = useRef<HTMLElement | null>(null);
+  const jdModeBadgeRef = useRef<HTMLSpanElement | null>(null);
   const streamCardRef = useRef<HTMLDivElement | null>(null);
   const streamBarRef = useRef<HTMLDivElement | null>(null);
   const tokenPreRef = useRef<HTMLPreElement | null>(null);
@@ -66,6 +75,7 @@ const AnalyzePage: React.FC = () => {
   const {
     isLoading,
     isLoadingHistoryRun,
+    isPastedMode,
     elapsedSeconds,
     activeStep,
     completedSteps,
@@ -81,20 +91,37 @@ const AnalyzePage: React.FC = () => {
   } = useAnalysis();
 
   const trimmedLength = pastedText.trim().length;
-  const canSubmit =
+  const normalizedJd = useMemo(
+    () => pastedJd.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+    [pastedJd]
+  );
+  const jdLength = useMemo(
+    () => Array.from(normalizedJd.trim()).length,
+    [normalizedJd]
+  );
+  const hasJdInput = jdLength > 0;
+  const jdTooShort = hasJdInput && jdLength < 200;
+  const jdTooLong = jdLength > 12000;
+  const isJdValid = !hasJdInput || (!jdTooShort && !jdTooLong);
+  const isSpecificJobReady = hasJdInput && !jdTooShort && !jdTooLong;
+
+  const canSubmitCv =
     inputMode === 'upload' ? Boolean(selectedFile) : trimmedLength >= 200;
+  const canSubmit = canSubmitCv && isJdValid;
 
   const completedCount = Object.keys(completedSteps).length;
+  const totalActiveStages = isPastedMode ? 3 : PIPELINE_STEPS.length;
   const streamProgressRatio = useMemo(() => {
     const clampRatio = gsap.utils.clamp(0.08, 1);
-    if (activeStep && STEP_PROGRESS[activeStep]) {
-      return clampRatio(STEP_PROGRESS[activeStep]);
+    const progressTable = isPastedMode ? PASTED_STEP_PROGRESS : STEP_PROGRESS;
+    if (activeStep && progressTable[activeStep]) {
+      return clampRatio(progressTable[activeStep]!);
     }
     if (completedCount > 0) {
-      return clampRatio((completedCount / PIPELINE_STEPS.length) * 0.96);
+      return clampRatio((completedCount / totalActiveStages) * 0.96);
     }
     return 0.12;
-  }, [activeStep, completedCount]);
+  }, [activeStep, completedCount, isPastedMode, totalActiveStages]);
 
   // Initial page reveal (subtle, once on mount)
   useGSAP(
@@ -140,6 +167,38 @@ const AnalyzePage: React.FC = () => {
       return () => mm.revert();
     },
     { scope: pageRef }
+  );
+
+  // Subtle badge transition when toggling between corpus search and specific pasted JD
+  useGSAP(
+    () => {
+      if (!jdCardRef.current || !jdModeBadgeRef.current) return;
+      const mm = gsap.matchMedia();
+      mm.add(
+        MOTION_QUERIES,
+        (context) => {
+          if (!context.conditions?.canAnimate || !jdModeBadgeRef.current) return;
+          gsap.fromTo(
+            jdModeBadgeRef.current,
+            { y: 4, opacity: 0.6 },
+            {
+              y: 0,
+              opacity: 1,
+              duration: 0.24,
+              ease: 'power2.out',
+              clearProps: 'transform,opacity',
+            }
+          );
+        },
+        jdCardRef
+      );
+      return () => mm.revert();
+    },
+    {
+      scope: jdCardRef,
+      dependencies: [isSpecificJobReady],
+      revertOnUpdate: true,
+    }
   );
 
   // Streaming card mount entrance (runs once each time streaming starts)
@@ -214,6 +273,19 @@ const AnalyzePage: React.FC = () => {
   // Discrete screen-reader announcement only on stage changes or completion (excludes timer ticks & token tail)
   const statusAnnouncement = useMemo(() => {
     if (isLoading && activeStep) {
+      if (isPastedMode) {
+        const pastedOrder: PipelineStep[] = ['extract', 'score', 'rank'];
+        const pIdx = pastedOrder.indexOf(activeStep);
+        if (pIdx >= 0) {
+          const pLabel =
+            activeStep === 'extract'
+              ? 'Reading the CV (using your job description)'
+              : activeStep === 'score'
+                ? 'Scoring your job'
+                : 'Ranking candidates';
+          return `Stage ${pIdx + 1} of ${pastedOrder.length}: ${pLabel}.`;
+        }
+      }
       const idx = PIPELINE_STEPS.findIndex((s) => s.key === activeStep);
       const step = PIPELINE_STEPS[idx];
       if (step) {
@@ -221,10 +293,13 @@ const AnalyzePage: React.FC = () => {
       }
     }
     if (!isLoading && results) {
+      if (!results.retrieved && results.matches.some((m) => m.jd === 'pasted')) {
+        return `Scored your pasted job description in ${results.seconds.toFixed(1)} seconds.`;
+      }
       return `Ranked ${results.matches.length} of ${results.pool} candidate jobs in ${results.seconds.toFixed(1)} seconds.`;
     }
     return '';
-  }, [isLoading, activeStep, results]);
+  }, [isLoading, isPastedMode, activeStep, results]);
 
   const switchMode = (nextMode: InputMode) => {
     setInputMode(nextMode);
@@ -260,8 +335,9 @@ const AnalyzePage: React.FC = () => {
     const ok = await runMatch({
       file: inputMode === 'upload' ? selectedFile : null,
       text: inputMode === 'paste' ? pastedText : undefined,
-      top: topJobs,
+      top: hasJdInput ? 1 : topJobs,
       asOf: asOf || undefined,
+      jdText: hasJdInput ? normalizedJd : undefined,
     });
     if (ok) {
       scrollResultsOnMobile();
@@ -279,6 +355,7 @@ const AnalyzePage: React.FC = () => {
     reset();
     setSelectedFile(null);
     setPastedText('');
+    setPastedJd('');
   };
 
   return (
@@ -328,146 +405,274 @@ const AnalyzePage: React.FC = () => {
               {/* Left Column: Input Form + Recent Runs */}
               <div className="lg:col-span-4 space-y-6 min-w-0">
                 <form
-                  data-analyze-panel
                   onSubmit={handleSubmit}
-                  className="bento-card p-5 sm:p-6 space-y-5"
+                  className="space-y-6"
                   noValidate
                 >
-                  {/* Segmented Input Mode Switch */}
-                  <div className="space-y-2">
-                    <span className="block text-[14px] font-medium text-ink">
-                      Resume source
-                    </span>
-                    <div
-                      role="group"
-                      aria-label="Resume input method"
-                      className="grid grid-cols-2 gap-1.5 p-1 rounded-ctrl bg-ground border border-hairline"
-                    >
-                      <button
-                        type="button"
-                        disabled={isLoading}
-                        aria-pressed={inputMode === 'upload'}
-                        onClick={() => switchMode('upload')}
-                        className={`min-h-[44px] px-3 rounded-[6px] text-[14px] font-medium transition-colors ${
-                          inputMode === 'upload'
-                            ? 'bg-card text-ink border border-hairline-strong'
-                            : 'text-muted hover:text-ink border border-transparent'
-                        }`}
-                      >
-                        Upload file
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isLoading}
-                        aria-pressed={inputMode === 'paste'}
-                        onClick={() => switchMode('paste')}
-                        className={`min-h-[44px] px-3 rounded-[6px] text-[14px] font-medium transition-colors ${
-                          inputMode === 'paste'
-                            ? 'bg-card text-ink border border-hairline-strong'
-                            : 'text-muted hover:text-ink border border-transparent'
-                        }`}
-                      >
-                        Paste CV text
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Active Input Control */}
-                  {inputMode === 'upload' ? (
-                    <FileUpload
-                      selectedFile={selectedFile}
-                      onFileSelect={handleFileSelect}
-                      disabled={isLoading}
-                    />
-                  ) : (
+                  {/* Card 1: Resume Source */}
+                  <div
+                    data-analyze-panel
+                    className="bento-card p-5 sm:p-6 space-y-5"
+                  >
+                    {/* Segmented Input Mode Switch */}
                     <div className="space-y-2">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <label
-                          htmlFor="cv-text-input"
-                          className="text-[14px] font-medium text-ink"
-                        >
-                          CV text
-                        </label>
-                        <span
-                          className={`font-mono text-[12px] tabular-nums ${
-                            trimmedLength >= 200 ? 'text-good' : 'text-muted'
+                      <span className="block text-[14px] font-medium text-ink">
+                        Resume source
+                      </span>
+                      <div
+                        role="group"
+                        aria-label="Resume input method"
+                        className="grid grid-cols-2 gap-1.5 p-1 rounded-ctrl bg-ground border border-hairline"
+                      >
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          aria-pressed={inputMode === 'upload'}
+                          onClick={() => switchMode('upload')}
+                          className={`min-h-[44px] px-3 rounded-[6px] text-[14px] font-medium transition-colors ${
+                            inputMode === 'upload'
+                              ? 'bg-card text-ink border border-hairline-strong'
+                              : 'text-muted hover:text-ink border border-transparent'
                           }`}
                         >
-                          {trimmedLength} / 200 min chars
-                        </span>
+                          Upload file
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          aria-pressed={inputMode === 'paste'}
+                          onClick={() => switchMode('paste')}
+                          className={`min-h-[44px] px-3 rounded-[6px] text-[14px] font-medium transition-colors ${
+                            inputMode === 'paste'
+                              ? 'bg-card text-ink border border-hairline-strong'
+                              : 'text-muted hover:text-ink border border-transparent'
+                          }`}
+                        >
+                          Paste CV text
+                        </button>
                       </div>
-                      <textarea
-                        id="cv-text-input"
-                        rows={8}
-                        value={pastedText}
-                        disabled={isLoading}
-                        onChange={(e) => setPastedText(e.target.value)}
-                        placeholder="Paste work history, skills, projects, and education..."
-                        className="field-input resize-y min-h-[190px]"
-                      />
-                    </div>
-                  )}
-
-                  {/* Options stacked inside narrow lg:col-span-4 sidebar so 1024px never clips dates or labels */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3 pt-1">
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="top-jobs-select"
-                        className="block text-[14px] font-medium text-ink"
-                      >
-                        Jobs to return
-                      </label>
-                      <select
-                        id="top-jobs-select"
-                        value={topJobs}
-                        disabled={isLoading}
-                        onChange={(e) => setTopJobs(Number(e.target.value))}
-                        className="field-input"
-                      >
-                        <option value={3}>Top 3 jobs</option>
-                        <option value={5}>Top 5 jobs</option>
-                        <option value={10}>Top 10 jobs</option>
-                      </select>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="as-of-input"
-                        className="block text-[14px] font-medium text-ink"
-                      >
-                        Experience up to
-                      </label>
-                      <input
-                        id="as-of-input"
-                        type="date"
-                        value={asOf}
+                    {/* Active Input Control */}
+                    {inputMode === 'upload' ? (
+                      <FileUpload
+                        selectedFile={selectedFile}
+                        onFileSelect={handleFileSelect}
                         disabled={isLoading}
-                        onChange={(e) => setAsOf(e.target.value)}
-                        className="field-input font-mono text-[15px]"
                       />
-                    </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <label
+                            htmlFor="cv-text-input"
+                            className="text-[14px] font-medium text-ink"
+                          >
+                            CV text
+                          </label>
+                          <span
+                            className={`font-mono text-[12px] tabular-nums ${
+                              trimmedLength >= 200 ? 'text-good' : 'text-muted'
+                            }`}
+                          >
+                            {trimmedLength} / 200 min chars
+                          </span>
+                        </div>
+                        <textarea
+                          id="cv-text-input"
+                          rows={8}
+                          value={pastedText}
+                          disabled={isLoading}
+                          onChange={(e) => setPastedText(e.target.value)}
+                          placeholder="Paste work history, skills, projects, and education..."
+                          className="field-input resize-y min-h-[190px]"
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  {/* Primary Action */}
-                  <button
-                    type="submit"
-                    disabled={!canSubmit || isLoading}
-                    className="btn-primary w-full"
+                  {/* Card 2: Optional Specific Job Description + Run Controls */}
+                  <section
+                    ref={jdCardRef}
+                    data-analyze-panel
+                    aria-labelledby="specific-jd-heading"
+                    className="bento-card p-5 sm:p-6 space-y-4"
                   >
-                    {isLoading ? (
-                      <span className="font-mono tabular-nums">
-                        Matching CV… ({elapsedSeconds}&nbsp;s)
-                      </span>
-                    ) : (
-                      <>
-                        <span>Run CV match</span>
-                        <ArrowRightIcon
-                          className="w-4 h-4 m-arrow"
-                          aria-hidden="true"
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h2
+                          id="specific-jd-heading"
+                          className="text-[17px] font-medium text-ink"
+                        >
+                          Match against a specific job
+                        </h2>
+                        <span
+                          ref={jdModeBadgeRef}
+                          className={`px-2 py-0.5 rounded font-mono text-[12px] border ${
+                            isSpecificJobReady
+                              ? 'bg-accent-soft border-accent-line text-accent-text font-medium'
+                              : 'bg-ground border-hairline text-muted'
+                          }`}
+                        >
+                          {isSpecificJobReady ? '1 job · active' : 'Optional'}
+                        </span>
+                      </div>
+                      <p className="text-[13.5px] text-muted leading-relaxed">
+                        Leave blank to search all 361 CareerViet jobs, or paste
+                        one posting to score your CV against that role alone.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <label
+                          htmlFor="jd-text-input"
+                          className="text-[14px] font-medium text-ink"
+                        >
+                          Paste a job description
+                        </label>
+                        <span
+                          id="jd-char-counter"
+                          className={`font-mono text-[12px] tabular-nums ${
+                            !hasJdInput
+                              ? 'text-muted'
+                              : jdTooLong
+                                ? 'text-bad'
+                                : jdTooShort
+                                  ? 'text-pot'
+                                  : 'text-good'
+                          }`}
+                        >
+                          {!hasJdInput
+                            ? '0 / 200–12,000 chars'
+                            : jdTooShort
+                              ? `${jdLength} / 200 min chars`
+                              : `${jdLength.toLocaleString()} / 12,000 max chars`}
+                        </span>
+                      </div>
+
+                      <textarea
+                        id="jd-text-input"
+                        rows={5}
+                        value={pastedJd}
+                        disabled={isLoading}
+                        aria-invalid={jdTooShort || jdTooLong}
+                        aria-describedby={
+                          jdTooShort || jdTooLong
+                            ? 'jd-char-counter jd-validation-msg'
+                            : 'jd-char-counter'
+                        }
+                        onChange={(e) => setPastedJd(e.target.value)}
+                        placeholder="Paste job title, required skills, responsibilities, and qualifications..."
+                        className="field-input resize-y min-h-[132px]"
+                      />
+
+                      {jdTooShort && (
+                        <p
+                          id="jd-validation-msg"
+                          className="text-[13px] text-pot leading-snug"
+                        >
+                          Paste at least 200 characters ({200 - jdLength} more
+                          needed), or clear this field to search all 361 jobs.
+                        </p>
+                      )}
+
+                      {jdTooLong && (
+                        <p
+                          id="jd-validation-msg"
+                          role="alert"
+                          className="text-[13px] text-bad leading-snug"
+                        >
+                          Shorten the job description to 12,000 characters or
+                          fewer ({(jdLength - 12000).toLocaleString()} over
+                          limit).
+                        </p>
+                      )}
+
+                      {hasJdInput && (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => setPastedJd('')}
+                            className="inline-flex items-center min-h-[44px] px-3 rounded-ctrl border border-hairline bg-ground text-[13px] font-medium text-muted hover:text-ink hover:border-hairline-strong transition-colors disabled:opacity-50"
+                          >
+                            Clear job description
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Options stacked inside narrow lg:col-span-4 sidebar so 1024px never clips dates or labels */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3 pt-3 border-t border-hairline">
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="top-jobs-select"
+                          className="block text-[14px] font-medium text-ink"
+                        >
+                          Jobs to return
+                        </label>
+                        <select
+                          id="top-jobs-select"
+                          value={hasJdInput ? 1 : topJobs}
+                          disabled={isLoading || hasJdInput}
+                          onChange={(e) => setTopJobs(Number(e.target.value))}
+                          className="field-input disabled:opacity-75"
+                        >
+                          {hasJdInput ? (
+                            <option value={1}>1 job (your pasted job)</option>
+                          ) : (
+                            <>
+                              <option value={3}>Top 3 jobs</option>
+                              <option value={5}>Top 5 jobs</option>
+                              <option value={10}>Top 10 jobs</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="as-of-input"
+                          className="block text-[14px] font-medium text-ink"
+                        >
+                          Experience up to
+                        </label>
+                        <input
+                          id="as-of-input"
+                          type="date"
+                          value={asOf}
+                          disabled={isLoading}
+                          onChange={(e) => setAsOf(e.target.value)}
+                          className="field-input font-mono text-[15px]"
                         />
-                      </>
-                    )}
-                  </button>
+                      </div>
+                    </div>
+
+                    {/* Primary Action */}
+                    <button
+                      type="submit"
+                      disabled={!canSubmit || isLoading || isLoadingHistoryRun}
+                      className="btn-primary w-full"
+                    >
+                      {isLoading ? (
+                        <span className="font-mono tabular-nums">
+                          Matching CV… ({elapsedSeconds}&nbsp;s)
+                        </span>
+                      ) : (
+                        <>
+                          <span>
+                            {isSpecificJobReady
+                              ? 'Match against this job'
+                              : 'Run CV match'}
+                          </span>
+                          <ArrowRightIcon
+                            className="w-4 h-4 m-arrow"
+                            aria-hidden="true"
+                          />
+                        </>
+                      )}
+                    </button>
+                  </section>
                 </form>
 
                 {/* Recent Runs Bento Card (/api/history) */}
@@ -497,6 +702,7 @@ const AnalyzePage: React.FC = () => {
                     <ul className="space-y-2">
                       {history.map((run) => {
                         const lead = run.top?.[0];
+                        const isPastedRun = lead?.jd === 'pasted';
                         const isSelected = results?.run_id === run.run_id;
                         return (
                           <li key={run.run_id}>
@@ -512,13 +718,25 @@ const AnalyzePage: React.FC = () => {
                             >
                               <div className="flex items-baseline justify-between gap-2">
                                 <span className="text-[14px] font-medium text-ink truncate">
-                                  {lead?.title || lead?.jd || 'Saved match run'}
+                                  {lead?.title ||
+                                    (isPastedRun
+                                      ? 'Your pasted job'
+                                      : lead?.jd) ||
+                                    'Saved match run'}
                                 </span>
                                 <span className="font-mono text-[12px] text-muted shrink-0 tabular-nums">
                                   #{run.run_id}
                                 </span>
                               </div>
                               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[12px] font-mono text-muted tabular-nums">
+                                {isPastedRun && (
+                                  <>
+                                    <span className="text-accent-text">
+                                      Your pasted job
+                                    </span>
+                                    <span aria-hidden="true">·</span>
+                                  </>
+                                )}
                                 {lead?.grade && (
                                   <span className="text-ink">{lead.grade}</span>
                                 )}
@@ -590,7 +808,9 @@ const AnalyzePage: React.FC = () => {
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="space-y-1">
                           <h2 className="text-[21px] leading-snug text-ink">
-                            Running CareerViet matching pipeline
+                            {isPastedMode
+                              ? 'Matching CV against your job description'
+                              : 'Running CareerViet matching pipeline'}
                           </h2>
                           <p className="text-[14px] text-muted">
                             Streaming live progress over{' '}
@@ -633,9 +853,19 @@ const AnalyzePage: React.FC = () => {
                     {/* 4-Stage Checklist */}
                     <ol className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {PIPELINE_STEPS.map((step, idx) => {
+                        const isSkipped =
+                          isPastedMode && step.key === 'retrieve';
                         const doneTime = completedSteps[step.key];
-                        const isDone = typeof doneTime === 'number';
-                        const isCurrent = activeStep === step.key;
+                        const isDone = !isSkipped && typeof doneTime === 'number';
+                        const isCurrent = !isSkipped && activeStep === step.key;
+                        const stepLabel = isSkipped
+                          ? 'Using your job description'
+                          : isPastedMode && step.key === 'score'
+                            ? 'Scoring your job'
+                            : step.label;
+                        const stepDetail = isSkipped
+                          ? 'Corpus search skipped — scoring your pasted posting directly'
+                          : step.detail;
 
                         return (
                           <li
@@ -646,14 +876,20 @@ const AnalyzePage: React.FC = () => {
                                 ? 'bg-good-bg/60 border-good-line'
                                 : isCurrent
                                   ? 'bg-accent-soft border-accent-line'
-                                  : 'bg-surface border-hairline border-dashed'
+                                  : isSkipped
+                                    ? 'bg-ground border-hairline'
+                                    : 'bg-surface border-hairline border-dashed'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-mono text-[12px] text-muted">
                                 0{idx + 1}
                               </span>
-                              {isDone ? (
+                              {isSkipped ? (
+                                <span className="font-mono text-[12px] px-2 py-0.5 rounded bg-accent-soft/75 border border-accent-line text-accent-text">
+                                  Skipped
+                                </span>
+                              ) : isDone ? (
                                 <span className="inline-flex items-center gap-1 font-mono text-[12px] text-good tabular-nums">
                                   <CheckCircleIcon
                                     className="w-4 h-4"
@@ -677,10 +913,10 @@ const AnalyzePage: React.FC = () => {
                               )}
                             </div>
                             <p className="text-[15px] font-medium text-ink">
-                              {step.label}
+                              {stepLabel}
                             </p>
                             <p className="text-[13px] text-muted leading-relaxed">
-                              {step.detail}
+                              {stepDetail}
                             </p>
                           </li>
                         );

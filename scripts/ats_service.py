@@ -79,16 +79,21 @@ class Ranker:
         self.jd_emb, self.jd_texts = cached, jd_texts
         self.tfidf = TfidfVectorizer(sublinear_tf=True, stop_words="english").fit(list(jd_texts.values()))
 
-    def scores(self, cv_text: str, cv_title: str | None, rows: list[tuple[str, str | None, dict]]) -> list[float]:
+    def scores(self, cv_text: str, cv_title: str | None, rows: list[tuple[str, str | None, dict]],
+               texts: dict[str, str] | None = None) -> list[float]:
         """rows: (jd id, jd title, V3.1 unrounded dimension scores) -> hybrid logits (higher = better fit)."""
         cv = self.emb.encode([cv_text], query=True)[0]
         titles = self.emb.encode([cv_title or "unknown"] + [t or "unknown" for _, t, _ in rows])
+        extra = list(dict.fromkeys(jd for jd, _, _ in rows if jd not in self.jd_emb))
+        extra_emb = dict(zip(extra, self.emb.encode([texts[j] for j in extra]))) if extra else {}
         tf_cv = self.tfidf.transform([cv_text])
         w, out, self.last_features = dict(zip(self.model["features"], self.model["coefficients"])), [], []
         for k, (jd, _, dims) in enumerate(rows):
+            jd_vec = self.jd_emb[jd] if jd in self.jd_emb else extra_emb[jd]
+            jd_txt = self.jd_texts[jd] if jd in self.jd_texts else texts[jd]
             feats = {d: dims[d] / 100 for d in ("skills", "title", "experience", "education", "industry")}
-            feats |= {"text_cos": float(cv @ self.jd_emb[jd]), "title_cos": float(titles[0] @ titles[k + 1]),
-                      "tfidf_cos": float((tf_cv @ self.tfidf.transform([self.jd_texts[jd]]).T).toarray()[0, 0])}
+            feats |= {"text_cos": float(cv @ jd_vec), "title_cos": float(titles[0] @ titles[k + 1]),
+                      "tfidf_cos": float((tf_cv @ self.tfidf.transform([jd_txt]).T).toarray()[0, 0])}
             out.append(self.model["intercept"] + sum(w[f] * feats[f] for f in self.model["features"]))
             self.last_features.append({f: w[f] * feats[f] for f in self.model["features"]} | {"_values": feats})
         return out
@@ -250,17 +255,24 @@ def corpus_ranker() -> "Ranker":
 
 
 def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[str] | None = None,
-          rerank: bool = False, ranker: "Ranker | None" = None, on_step=None, on_token=None) -> dict:
+          rerank: bool = False, ranker: "Ranker | None" = None, on_step=None, on_token=None,
+          jd_text: str | None = None) -> dict:
     """The service call: extract the CV, retrieve `pool` JDs, score each with V3.1, return the best `top` explained.
+    When `jd_text` is given, retrieval is skipped and the CV is scored against that single pasted JD (`top` forced to 1).
     A JD whose extraction fails is reported in `skipped`, not silently dropped; a JD whose text repeats an earlier
     one in the pool is left out. Runs as the fixed LangGraph flow of service_graph().
     on_step(node) is called after each graph node; on_token(text) for each token the extractor generates."""
+    if jd_text is not None:
+        jd_ids, jd_texts, top = ["pasted"], {"pasted": jd_text}, 1
+    else:
+        jd_texts = None
     llm, answer = _llm() if on_token else None, None
     if llm:  # shortcut: one hook on the shared client, safe only while matches run one at a time (API LOCK)
         llm.on_token = on_token
     try:
         for update in service_graph().stream({"cv_text": cv_text, "as_of": as_of, "top": top, "pool": pool,
-                                              "jd_ids": jd_ids, "rerank": rerank, "ranker": ranker}, stream_mode="updates"):
+                                              "jd_ids": jd_ids, "jd_texts": jd_texts, "rerank": rerank, "ranker": ranker},
+                                             stream_mode="updates"):
             for node, out in update.items():
                 answer = (out or {}).get("answer", answer)
                 if on_step:
@@ -285,6 +297,7 @@ def service_graph():
         top: int
         pool: int
         jd_ids: Any
+        jd_texts: dict[str, str] | None
         rerank: bool
         ranker: Any
         client: Any
@@ -296,22 +309,34 @@ def service_graph():
 
     def extract(s: S) -> S:
         client = V4Client(_llm())
-        return {"client": client, "resume": _cache(s["as_of"], client).get(s["cv_text"], "resume")}
+        try:
+            return {"client": client, "resume": _cache(s["as_of"], client).get(s["cv_text"], "resume")}
+        except Exception as exc:
+            exc.source = "cv"
+            raise
 
     def find(s: S) -> S:
         return {"retrieved": True,
                 "jd_ids": retrieve(s["resume"].document.model_dump(mode="json"), s["pool"], s["rerank"])}
 
     def score(s: S) -> S:
-        config, paths, skipped, scored, seen = v31_config(), _jd_paths(), {}, [], set()
+        config, jd_texts, paths, skipped, scored, seen = v31_config(), s.get("jd_texts") or {}, None, {}, [], set()
         for rank, jd in enumerate(s["jd_ids"], 1):
             try:
-                text = (ROOT / paths[jd]).read_text(encoding="utf-8")
+                if jd in jd_texts:
+                    text = jd_texts[jd]
+                else:
+                    if paths is None:
+                        paths = _jd_paths()
+                    text = (ROOT / paths[jd]).read_text(encoding="utf-8")
                 if text in seen:  # the corpus holds a few postings twice (jd_150 = jd_342): identical text, identical score
                     continue
                 seen.add(text)
                 job = _cache(client=s["client"]).get(text, "job")
-            except Exception as exc:  # one bad JD must not sink the whole answer
+            except Exception as exc:  # one bad JD must not sink a corpus run; a pasted JD has no fallback and must fail
+                if jd == "pasted":
+                    exc.source = "jd"
+                    raise
                 skipped[jd] = f"{type(exc).__name__}: {str(exc)[:200]}"
                 continue
             scored.append((rank, jd, job, score_pair_v3(s["resume"], job, as_of_date=date.fromisoformat(s["as_of"]),
@@ -319,22 +344,25 @@ def service_graph():
         return {"scored": scored, "skipped": skipped}
 
     def rank(s: S) -> S:
-        rows, scored, resume = [], s["scored"], s["resume"]
+        rows, scored, resume, jd_texts = [], s["scored"], s["resume"], s.get("jd_texts") or {}
         if scored:
             ranker = s.get("ranker") or corpus_ranker()  # TF-IDF weights come from the whole corpus, never just the pool
             cv_title = _latest_title(resume, date.fromisoformat(s["as_of"])) or next(
                 (w.position for w in resume.document.work if w.position), None)
             logits = ranker.scores(s["cv_text"], cv_title, [(jd, job.document.title, r.unrounded_scores.model_dump())
-                                                            for _, jd, job, r in scored])
+                                                            for _, jd, job, r in scored], texts=jd_texts or None)
             for (rnk, jd, job, result), logit, contrib in zip(scored, logits, ranker.last_features):
                 grade, fit = ranker.grade(logit), 100 / (1 + math.exp(-logit))
-                rows.append({"jd": jd, "title": job.document.title, "retrieval_rank": rnk, "fit": round(fit, 1),
-                             "_logit": logit, "grade": GRADES[grade], "rule_score": result.overall_score,
-                             "scores": result.scores.model_dump(), "matched_skills": result.matched_skills,
-                             "missing_skills": result.missing_skills,
-                             "explanation": explain(result, grade, round(fit, 1), Ranker.why(contrib), vague_titles(resume)),
-                             "evidence": {k: v.evidence[:3] for k, v in result.dimensions.items()
-                                          if v.supported and v.evidence}, "_o5": (job, result, grade, fit)})
+                row = {"jd": jd, "title": job.document.title, "retrieval_rank": rnk, "fit": round(fit, 1),
+                       "_logit": logit, "grade": GRADES[grade], "rule_score": result.overall_score,
+                       "scores": result.scores.model_dump(), "matched_skills": result.matched_skills,
+                       "missing_skills": result.missing_skills,
+                       "explanation": explain(result, grade, round(fit, 1), Ranker.why(contrib), vague_titles(resume)),
+                       "evidence": {k: v.evidence[:3] for k, v in result.dimensions.items()
+                                    if v.supported and v.evidence}, "_o5": (job, result, grade, fit)}
+                if jd in jd_texts:
+                    row["job_text"] = jd_texts[jd]
+                rows.append(row)
         rows.sort(key=lambda r: (-r.pop("_logit"), r["retrieval_rank"]))
         if rows:  # O5 writes the explanations of the returned matches only, in the CV's language
             from scripts.o5_build_pairs import facts

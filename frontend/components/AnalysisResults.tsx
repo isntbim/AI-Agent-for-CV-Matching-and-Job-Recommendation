@@ -398,6 +398,7 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
   };
 
   const selectId = `verdict-${runId ?? 'live'}-${match.jd}-${rank}`;
+  const isPastedJob = match.jd === 'pasted';
 
   return (
     <article
@@ -420,14 +421,25 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
           </span>
           <div className="min-w-0 space-y-1.5">
             <h3 className="text-[19px] sm:text-[21px] leading-[1.25] font-medium text-ink [overflow-wrap:anywhere] break-words">
-              {match.title || 'Untitled job posting'}
+              {match.title ||
+                (isPastedJob ? 'Your pasted job' : 'Untitled job posting')}
             </h3>
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] font-mono text-muted tabular-nums">
-              <span className="px-2 py-0.5 rounded bg-ground border border-hairline text-ink">
-                {match.jd}
+              <span
+                className={`px-2 py-0.5 rounded border ${
+                  isPastedJob
+                    ? 'bg-accent-soft border-accent-line text-accent-text'
+                    : 'bg-ground border-hairline text-ink'
+                }`}
+              >
+                {isPastedJob ? 'Your pasted job' : match.jd}
               </span>
-              <span>Retrieval #{match.retrieval_rank}</span>
-              <span aria-hidden="true">·</span>
+              {!isPastedJob && (
+                <>
+                  <span>Retrieval #{match.retrieval_rank}</span>
+                  <span aria-hidden="true">·</span>
+                </>
+              )}
               <span>Rule {match.rule_score.toFixed(1)}/100</span>
             </div>
           </div>
@@ -804,7 +816,9 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
       {showJobText && match.job_text && (
         <div className="rounded-panel bg-ground border border-hairline p-4 space-y-2">
           <h5 className="text-[14px] font-medium text-ink">
-            Full CareerViet job posting ({match.jd})
+            {isPastedJob
+              ? 'Your pasted job description'
+              : `Full CareerViet job posting (${match.jd})`}
           </h5>
           <pre className="text-[13px] leading-relaxed text-body font-mono max-h-80 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words m-0">
             {match.job_text}
@@ -823,6 +837,8 @@ const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const matches = result.matches || [];
   const skippedCount = result.skipped ? Object.keys(result.skipped).length : 0;
+  const isPastedRun =
+    !result.retrieved && matches.some((m) => m.jd === 'pasted');
 
   useGSAP(
     () => {
@@ -946,7 +962,10 @@ const AnalysisResults: React.FC<AnalysisResultsProps> = ({
             )}
           </div>
           <h2 className="text-[22px] sm:text-[26px] leading-[1.2] text-ink">
-            {matches.length} best of {result.pool} candidate jobs ·{' '}
+            {isPastedRun
+              ? 'Matched against your pasted job'
+              : `${matches.length} best of ${result.pool} candidate jobs`}{' '}
+            ·{' '}
             <span className="font-mono tabular-nums">
               {result.seconds.toFixed(1)} s
             </span>

@@ -15,6 +15,7 @@ const STEP_ORDER: PipelineStep[] = ['extract', 'retrieve', 'score', 'rank'];
 export interface UseAnalysisReturn {
   isLoading: boolean;
   isLoadingHistoryRun: boolean;
+  isPastedMode: boolean;
   elapsedSeconds: number;
   activeStep: PipelineStep | null;
   completedSteps: Partial<Record<PipelineStep, number>>;
@@ -32,6 +33,7 @@ export interface UseAnalysisReturn {
 export const useAnalysis = (): UseAnalysisReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistoryRun, setIsLoadingHistoryRun] = useState(false);
+  const [isPastedMode, setIsPastedMode] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [activeStep, setActiveStep] = useState<PipelineStep | null>(null);
   const [completedSteps, setCompletedSteps] = useState<
@@ -45,6 +47,7 @@ export const useAnalysis = (): UseAnalysisReturn => {
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const reqSeqRef = useRef(0);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -71,7 +74,13 @@ export const useAnalysis = (): UseAnalysisReturn => {
   }, [refreshHistory, stopTimer]);
 
   const runMatch = useCallback(
-    async ({ file, text, top = 5, asOf }: MatchCvParams): Promise<boolean> => {
+    async ({
+      file,
+      text,
+      top = 5,
+      asOf,
+      jdText,
+    }: MatchCvParams): Promise<boolean> => {
       const trimmedText = text?.trim() || '';
       if (!file && !trimmedText) {
         const msg =
@@ -89,11 +98,32 @@ export const useAnalysis = (): UseAnalysisReturn => {
         return false;
       }
 
+      const trimmedJd =
+        jdText?.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim() || '';
+      const jdCodePoints = Array.from(trimmedJd).length;
+      if (
+        jdCodePoints > 0 &&
+        (jdCodePoints < 200 || jdCodePoints > 12000)
+      ) {
+        const msg =
+          'Paste between 200 and 12,000 characters for the job description, or leave it blank to search all 361 jobs.';
+        setError(msg);
+        toast.error(msg);
+        return false;
+      }
+      const pastedMode = jdCodePoints > 0;
+      const stepSequence: PipelineStep[] = pastedMode
+        ? ['extract', 'score', 'rank']
+        : STEP_ORDER;
+
+      const reqId = ++reqSeqRef.current;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
       setIsLoading(true);
+      setIsLoadingHistoryRun(false);
+      setIsPastedMode(pastedMode);
       setElapsedSeconds(0);
       setActiveStep('extract');
       setCompletedSteps({});
@@ -113,39 +143,47 @@ export const useAnalysis = (): UseAnalysisReturn => {
           {
             file,
             text: file ? undefined : trimmedText,
-            top,
+            top: pastedMode ? 1 : top,
             asOf,
+            jdText: pastedMode ? trimmedJd : undefined,
           },
           {
             signal: controller.signal,
             onToken: ({ tokens, tail }) => {
+              if (reqSeqRef.current !== reqId) return;
               setStreamTokens(tokens);
               setStreamTail(tail);
             },
             onStep: ({ step, seconds }) => {
+              if (reqSeqRef.current !== reqId) return;
               setCompletedSteps((prev) => ({ ...prev, [step]: seconds }));
               setStreamTail('');
-              const idx = STEP_ORDER.indexOf(step);
+              const idx = stepSequence.indexOf(step);
               const nextStep =
-                idx >= 0 && idx + 1 < STEP_ORDER.length
-                  ? STEP_ORDER[idx + 1]
+                idx >= 0 && idx + 1 < stepSequence.length
+                  ? stepSequence[idx + 1]
                   : null;
               setActiveStep(nextStep);
             },
           }
         );
 
+        if (reqSeqRef.current !== reqId) {
+          return false;
+        }
         stopTimer();
         setActiveStep(null);
         setIsLoading(false);
         setResults(response);
         void refreshHistory();
         toast.success(
-          `Ranked ${response.matches.length} jobs in ${response.seconds.toFixed(1)} s`
+          pastedMode || !response.retrieved
+            ? `Scored your job description in ${response.seconds.toFixed(1)} s`
+            : `Ranked ${response.matches.length} jobs in ${response.seconds.toFixed(1)} s`
         );
         return true;
       } catch (err) {
-        if (controller.signal.aborted) {
+        if (controller.signal.aborted || reqSeqRef.current !== reqId) {
           return false;
         }
         const errorMessage =
@@ -156,9 +194,11 @@ export const useAnalysis = (): UseAnalysisReturn => {
         toast.error(errorMessage);
         return false;
       } finally {
-        stopTimer();
-        setIsLoading(false);
-        setActiveStep(null);
+        if (reqSeqRef.current === reqId) {
+          stopTimer();
+          setIsLoading(false);
+          setActiveStep(null);
+        }
       }
     },
     [refreshHistory, stopTimer]
@@ -167,29 +207,38 @@ export const useAnalysis = (): UseAnalysisReturn => {
   const loadRun = useCallback(
     async (runId: number): Promise<boolean> => {
       if (isLoading) return false;
+      const reqId = ++reqSeqRef.current;
       setIsLoadingHistoryRun(true);
       setError(null);
       try {
         const saved = await getHistoryRun(runId);
+        if (reqSeqRef.current !== reqId) return false;
+        setIsPastedMode(!saved.retrieved);
         setResults(saved);
         return true;
       } catch (err) {
+        if (reqSeqRef.current !== reqId) return false;
         const msg =
           err instanceof Error ? err.message : `Could not load run #${runId}.`;
         setError(msg);
         toast.error(msg);
         return false;
       } finally {
-        setIsLoadingHistoryRun(false);
+        if (reqSeqRef.current === reqId) {
+          setIsLoadingHistoryRun(false);
+        }
       }
     },
     [isLoading]
   );
 
   const reset = useCallback(() => {
+    ++reqSeqRef.current;
     abortRef.current?.abort();
     stopTimer();
     setIsLoading(false);
+    setIsLoadingHistoryRun(false);
+    setIsPastedMode(false);
     setElapsedSeconds(0);
     setActiveStep(null);
     setCompletedSteps({});
@@ -202,6 +251,7 @@ export const useAnalysis = (): UseAnalysisReturn => {
   return {
     isLoading,
     isLoadingHistoryRun,
+    isPastedMode,
     elapsedSeconds,
     activeStep,
     completedSteps,

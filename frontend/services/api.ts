@@ -100,6 +100,7 @@ export interface MatchCvParams {
   text?: string;
   top?: number;
   asOf?: string;
+  jdText?: string;
 }
 
 export interface HistoryTopMatch {
@@ -170,6 +171,7 @@ function buildMatchFormData({
   text,
   top = 5,
   asOf,
+  jdText,
 }: MatchCvParams): FormData {
   const formData = new FormData();
   if (file) {
@@ -180,6 +182,13 @@ function buildMatchFormData({
   formData.append('top', String(top));
   if (asOf) {
     formData.append('as_of', asOf);
+  }
+  const trimmedJd =
+    typeof jdText === 'string'
+      ? jdText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+      : '';
+  if (trimmedJd.length > 0) {
+    formData.append('jd_text', trimmedJd);
   }
   return formData;
 }
