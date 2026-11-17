@@ -399,6 +399,8 @@ def repair(label: dict, text: str, task: str) -> tuple[dict, str, list[str]]:
     label, log = copy.deepcopy(label), []
     if not isinstance(label.get("document"), dict) or not isinstance(label.get("facts"), dict):
         return label, validate(label, text, task)[0], ["not a document/facts object: left for retry"]
+    if not isinstance(label["facts"].get("evidence") or {}, dict):  # e.g. a list: every fixer below expects an object
+        return label, validate(label, text, task)[0], ["facts.evidence is not an object: left for retry"]
     log += drop_undefined(label, JD_SCHEMA if task == "jd_extraction" else None)
     fix_evidence(label["facts"], text, log)
     (fix_jd if task == "jd_extraction" else fix_cv)(label, text, log)

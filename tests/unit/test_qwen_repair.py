@@ -131,3 +131,14 @@ def test_codex_review4_regressions():
     assert "compensation" not in bare["document"]  # an untouched JD gains nothing
 
 
+
+
+def test_repair_rejects_evidence_that_is_not_an_object_instead_of_crashing():
+    """A malformed answer with "evidence" as a list (seen on an AWQ base) must fail validation, so the service retries;
+    it used to raise AttributeError inside the V4 graph and sink the whole extraction."""
+    from scripts.qwen_repair import repair
+    label = {"document": {"schema_version": "resume-v3", "basics": {}, "work": [], "education": [], "skills": []},
+             "facts": {"evidence": [{"quote": "Python"}], "domains": []}}
+    repaired, status, _ = repair(label, "Python developer", "cv_extraction")
+    assert status not in ("pass", "partial")
+    assert repaired["facts"]["evidence"] == [{"quote": "Python"}]  # left as it came: the retry replaces it
