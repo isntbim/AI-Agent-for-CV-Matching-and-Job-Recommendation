@@ -1,0 +1,20 @@
+NGUYEN VAN AN
+Senior Accountant
+Email: an.nguyen@example.com | Ho Chi Minh City, Vietnam
+
+Summary
+Accountant with 6 years of experience in general ledger, month-end closing and tax reporting for manufacturing companies.
+
+Skills
+Excel, SAP, MISA, VAS, IFRS, financial reporting, account reconciliation, budgeting
+
+Experience
+Senior Accountant, Example Manufacturing Co., 2021-03 to Present
+- Prepared monthly financial statements under VAS and reconciled bank and intercompany accounts.
+- Led the year-end closing and worked with external auditors.
+
+Accountant, Sample Trading JSC, 2018-07 to 2021-02
+- Recorded payables and receivables in MISA and prepared VAT declarations.
+
+Education
+Bachelor of Accounting, University of Economics Ho Chi Minh City, 2018

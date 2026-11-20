@@ -262,7 +262,13 @@ def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[s
     A JD whose extraction fails is reported in `skipped`, not silently dropped; a JD whose text repeats an earlier
     one in the pool is left out. Runs as the fixed LangGraph flow of service_graph().
     on_step(node) is called after each graph node; on_token(text) for each token the extractor generates."""
+    from src.parser.injection_guard import strip_injections
+
+    cv_text, removed = strip_injections(cv_text)  # untrusted text: lines aimed at the AI are dropped and reported
+    removed = [dict(r, source="cv") for r in removed]
     if jd_text is not None:
+        jd_text, jd_removed = strip_injections(jd_text)
+        removed += [dict(r, source="jd") for r in jd_removed]
         jd_ids, jd_texts, top = ["pasted"], {"pasted": jd_text}, 1
     else:
         jd_texts = None
@@ -280,6 +286,8 @@ def match(cv_text: str, as_of: str, top: int = 5, pool: int = 20, jd_ids: list[s
     finally:
         if llm:
             llm.on_token = None
+    if answer is not None:
+        answer["injection_removed"] = removed  # shown to the user: what the guard dropped before extraction
     return answer
 
 
