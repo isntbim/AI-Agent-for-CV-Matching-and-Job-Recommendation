@@ -107,13 +107,13 @@ const HomePage: React.FC = () => {
             rubricTl.to(
               speedObj,
               {
-                val: 0.9,
+                val: 17,
                 duration: 0.75,
                 ease: 'power2.out',
                 onUpdate: () => {
                   if (cachedSpeedRef.current) {
                     cachedSpeedRef.current.textContent =
-                      speedObj.val.toFixed(1);
+                      speedObj.val.toFixed(0);
                   }
                 },
               },
@@ -145,7 +145,7 @@ const HomePage: React.FC = () => {
 
           return () => {
             if (cachedSpeedRef.current) {
-              cachedSpeedRef.current.textContent = '0.9';
+              cachedSpeedRef.current.textContent = '17';
             }
             RUBRIC_ROWS.forEach((row, idx) => {
               if (weightNumRefs.current[idx]) {
@@ -234,7 +234,7 @@ const HomePage: React.FC = () => {
                       <div className="flex items-baseline justify-between gap-4">
                         <dt className="text-muted">Cached CV</dt>
                         <dd className="font-mono text-[14px] text-good text-right tabular-nums">
-                          ~<span ref={cachedSpeedRef}>0.9</span>&nbsp;s
+                          ~<span ref={cachedSpeedRef}>17</span>&nbsp;s
                         </dd>
                       </div>
                     </dl>

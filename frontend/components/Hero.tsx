@@ -170,13 +170,13 @@ const Hero: React.FC = () => {
             tl.to(
               repeatState,
               {
-                val: 0.9,
+                val: 17,
                 duration: 0.85,
                 ease: 'power2.out',
                 onUpdate: () => {
                   if (repeatNumRef.current) {
                     repeatNumRef.current.textContent =
-                      repeatState.val.toFixed(1);
+                      repeatState.val.toFixed(0);
                   }
                 },
               },
@@ -292,7 +292,7 @@ const Hero: React.FC = () => {
             if (corpusNumRef.current) corpusNumRef.current.textContent = '361';
             if (weightsNumRef.current)
               weightsNumRef.current.textContent = '100';
-            if (repeatNumRef.current) repeatNumRef.current.textContent = '0.9';
+            if (repeatNumRef.current) repeatNumRef.current.textContent = '17';
             if (ringNumRef.current) ringNumRef.current.textContent = '99.5';
             if (ringArcRef.current) {
               ringArcRef.current.style.strokeDashoffset =
@@ -426,7 +426,7 @@ const Hero: React.FC = () => {
               <div data-hero-stat>
                 <dt className="text-[13px] text-muted">Repeat CV</dt>
                 <dd className="text-[20px] sm:text-[26px] font-medium tracking-[-0.03em] text-ink font-mono tabular-nums mt-0.5">
-                  ~<span ref={repeatNumRef}>0.9</span>&nbsp;s
+                  ~<span ref={repeatNumRef}>17</span>&nbsp;s
                 </dd>
               </div>
             </dl>

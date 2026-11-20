@@ -385,8 +385,8 @@ const AnalyzePage: React.FC = () => {
               </h1>
               <p className="text-[16px] text-body leading-relaxed">
                 Upload a resume file or paste plain text. First-time extraction
-                streams live from Qwen2.5-7B in 20–60&nbsp;s; cached CVs return
-                in under a second.
+                streams live from Qwen2.5-7B in 20–60&nbsp;s; a cached CV skips extraction
+                and takes about 17&nbsp;s, mostly writing the match explanations.
               </p>
             </header>
 

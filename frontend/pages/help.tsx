@@ -23,9 +23,9 @@ const QUICK_SPECS = [
   },
   {
     label: 'Cached latency',
-    value: '~0.9 s',
+    value: '~17 s',
     detail:
-      'Identical CV text + cutoff date hits the local SHA-256 extraction cache.',
+      'Identical CV text + cutoff date skips extraction (SHA-256 cache); most of the time is writing the five match explanations.',
     highlight: false,
   },
   {
@@ -45,7 +45,7 @@ const FAQS = [
   {
     question: 'Why does a brand-new CV take 20 to 60 seconds?',
     answer:
-      'Every new CV is parsed locally on a single 12 GB GPU by the QLoRA fine-tuned Qwen2.5-7B extractor and verified by a LangGraph repair loop. Once extracted, its structured JSON is cached on disk by SHA-256 hash and cutoff date, so repeat runs return in about one second.',
+      'Every new CV is parsed locally on a single 12 GB GPU by the QLoRA fine-tuned Qwen2.5-7B extractor and verified by a LangGraph repair loop. Once extracted, its structured JSON is cached on disk by SHA-256 hash and cutoff date, so a repeat run skips extraction and takes about 17 seconds, most of it spent writing the five match explanations.',
   },
   {
     question: 'How is the 0–100 fit score calculated?',
