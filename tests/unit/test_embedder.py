@@ -207,7 +207,7 @@ class TestBGEEmbedder:
     @classmethod
     def embedder(cls) -> BGEEmbedder:
         """Load the BGE-M3 model once for the entire class (slow fixture)."""
-        return BGEEmbedder(model_name="BAAI/bge-m3", normalize_embeddings=True)
+        return BGEEmbedder(model_name="BAAI/bge-m3", normalize_embeddings=True, device="cpu")  # as the service runs it
 
     def test_initializes_correctly(self, embedder: BGEEmbedder):
         """BGEEmbedder must load the model and report correct dimension."""
