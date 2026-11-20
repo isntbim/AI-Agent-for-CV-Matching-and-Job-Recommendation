@@ -15,6 +15,7 @@ import {
 import {
   DIMENSION_WEIGHTS,
   FitGrade,
+  InjectionFinding,
   JobMatch,
   MatchResponse,
   SavedFeedback,
@@ -45,6 +46,54 @@ const DIMENSION_LABELS: Record<ScoreDimension, string> = {
   location: 'Location',
   salary: 'Salary',
 };
+
+const INJECTION_KIND_LABELS: Record<string, string> = {
+  override: 'instruction override',
+  fake_system_message: 'system prompt markup',
+  addresses_the_model: 'direct message to the AI',
+  rating_order: 'score instruction',
+  json_injection: 'injected JSON field',
+};
+
+// Exact weights and cut-offs from configs/hybrid_qwen_v1.json and scripts/ats_service.py.
+const FIT_FORMULA_INTERCEPT = '-10.958603';
+const FIT_FORMULA_FEATURES: {
+  name: string;
+  weight: string;
+  detail: string;
+}[] = [
+  { name: 'skills', weight: '1.758144', detail: 'V3.1 skills / 100' },
+  { name: 'title', weight: '0.137788', detail: 'V3.1 title / 100' },
+  { name: 'experience', weight: '0.15821', detail: 'V3.1 experience / 100' },
+  { name: 'education', weight: '-0.095872', detail: 'V3.1 education / 100' },
+  { name: 'industry', weight: '0.83903', detail: 'V3.1 industry / 100' },
+  {
+    name: 'text_cos',
+    weight: '12.967617',
+    detail: 'Qwen3-Embedding-4B text cosine',
+  },
+  {
+    name: 'title_cos',
+    weight: '4.369925',
+    detail: 'Qwen3-Embedding-4B title cosine',
+  },
+  { name: 'tfidf_cos', weight: '7.043981', detail: 'Corpus TF-IDF cosine' },
+];
+
+function formatRemovedSummary(items: InjectionFinding[]): string {
+  const total = items.length;
+  const cvCount = items.filter((item) => item.source === 'cv').length;
+  const jdCount = items.filter((item) => item.source === 'jd').length;
+  const lineWord = total === 1 ? '1 line was' : `${total} lines were`;
+
+  if (cvCount > 0 && jdCount > 0) {
+    return `${lineWord} removed before scoring (${cvCount} from your CV, ${jdCount} from the job description).`;
+  }
+  if (jdCount > 0) {
+    return `${lineWord} removed from the job description before scoring.`;
+  }
+  return `${lineWord} removed from your CV before scoring.`;
+}
 
 function getGradeMeta(grade: FitGrade) {
   switch (grade) {
@@ -440,7 +489,9 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
                   <span aria-hidden="true">·</span>
                 </>
               )}
-              <span>Rule {match.rule_score.toFixed(1)}/100</span>
+              <span title="7-dimension V3.1 rule score; shown for breakdown and does not set the 0–100 fit score">
+                Rule {match.rule_score.toFixed(1)}/100
+              </span>
             </div>
           </div>
         </div>
@@ -576,7 +627,7 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
                 Seven rule weights
               </h4>
               <p className="text-[12px] font-mono text-muted">
-                100 pt total · V3.1 scorer
+                100 pt total · V3.1 breakdown (does not set fit)
               </p>
             </div>
             <button
@@ -835,10 +886,17 @@ const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   onFeedbackSaved,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [showFormula, setShowFormula] = useState(false);
   const matches = result.matches || [];
+  const removedLines = result.injection_removed ?? [];
   const skippedCount = result.skipped ? Object.keys(result.skipped).length : 0;
   const isPastedRun =
     !result.retrieved && matches.some((m) => m.jd === 'pasted');
+
+  useEffect(() => {
+    setShowRemoved(false);
+  }, [result]);
 
   useGSAP(
     () => {
@@ -946,49 +1004,188 @@ const AnalysisResults: React.FC<AnalysisResultsProps> = ({
       {/* Results Summary Bento Card */}
       <div
         data-result-card
-        className="bento-card bento-card--highlight p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        className="bento-card bento-card--highlight p-5 sm:p-6 space-y-4"
       >
-        <div className="space-y-1.5 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-[12px] font-mono text-muted">
-            <span className="px-2 py-0.5 rounded bg-accent-soft text-accent-text border border-accent-line">
-              {result.ranking_model}
-            </span>
-            <span>as of {result.as_of}</span>
-            {typeof result.run_id === 'number' && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>run #{result.run_id}</span>
-              </>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1.5 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[12px] font-mono text-muted">
+              <span className="px-2 py-0.5 rounded bg-accent-soft text-accent-text border border-accent-line">
+                {result.ranking_model}
+              </span>
+              <span>as of {result.as_of}</span>
+              {typeof result.run_id === 'number' && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>run #{result.run_id}</span>
+                </>
+              )}
+            </div>
+            <h2 className="text-[22px] sm:text-[26px] leading-[1.2] text-ink">
+              {isPastedRun
+                ? 'Matched against your pasted job'
+                : `${matches.length} best of ${result.pool} candidate jobs`}{' '}
+              ·{' '}
+              <span className="font-mono tabular-nums">
+                {result.seconds.toFixed(1)} s
+              </span>
+            </h2>
+            {skippedCount > 0 && (
+              <p className="text-[13px] text-pot">
+                {skippedCount} candidate posting{skippedCount === 1 ? '' : 's'}{' '}
+                skipped during scoring due to incomplete job schema.
+              </p>
             )}
           </div>
-          <h2 className="text-[22px] sm:text-[26px] leading-[1.2] text-ink">
-            {isPastedRun
-              ? 'Matched against your pasted job'
-              : `${matches.length} best of ${result.pool} candidate jobs`}{' '}
-            ·{' '}
-            <span className="font-mono tabular-nums">
-              {result.seconds.toFixed(1)} s
-            </span>
-          </h2>
-          {skippedCount > 0 && (
-            <p className="text-[13px] text-pot">
-              {skippedCount} candidate posting{skippedCount === 1 ? '' : 's'}{' '}
-              skipped during scoring due to incomplete job schema.
-            </p>
+
+          {onNewAnalysis && (
+            <button
+              type="button"
+              onClick={onNewAnalysis}
+              className="btn-secondary shrink-0 w-full sm:w-auto"
+            >
+              <ArrowPathIcon className="w-4 h-4" aria-hidden="true" />
+              <span>Match another CV</span>
+            </button>
           )}
         </div>
 
-        {onNewAnalysis && (
-          <button
-            type="button"
-            onClick={onNewAnalysis}
-            className="btn-secondary shrink-0 w-full sm:w-auto"
-          >
-            <ArrowPathIcon className="w-4 h-4" aria-hidden="true" />
-            <span>Match another CV</span>
-          </button>
-        )}
+        {/* Fit Score Formula Strip */}
+        <div className="pt-3.5 border-t border-hairline space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <p className="text-[13px] text-muted leading-relaxed">
+              <span className="font-mono text-ink">
+                fit = 100 / (1 + exp(-logit))
+              </span>{' '}
+              from <span className="font-mono">{result.ranking_model}</span>{' '}
+              (5 rule scores + 3 cosines); verdict cut-offs around 32 and 86.
+              The 7-axis rule score is shown beside fit for breakdown only.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowFormula((prev) => !prev)}
+              aria-expanded={showFormula}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-ctrl border border-hairline-strong bg-ground text-[13px] font-medium text-ink hover:bg-surface transition-colors shrink-0 self-start sm:self-auto"
+            >
+              <span>{showFormula ? 'Hide formula' : 'Score formula'}</span>
+              {showFormula ? (
+                <ChevronUpIcon className="w-4 h-4 text-muted" aria-hidden="true" />
+              ) : (
+                <ChevronDownIcon className="w-4 h-4 text-muted" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+
+          {showFormula && (
+            <div className="rounded-panel bg-ground border border-hairline p-4 space-y-3 text-[13px] text-body">
+              <div className="space-y-1">
+                <p className="font-mono text-ink tabular-nums">
+                  fit = 100 / (1 + exp(-logit)), &nbsp;logit ={' '}
+                  {FIT_FORMULA_INTERCEPT} + Σ(weight × feature)
+                </p>
+                <p className="text-muted leading-relaxed">
+                  Verdict cut-offs (<span className="font-mono">grade_cutoffs</span>{' '}
+                  <span className="font-mono tabular-nums">-0.754985</span> and{' '}
+                  <span className="font-mono tabular-nums">1.828859</span>):{' '}
+                  <span className="text-ink">No Fit</span> below{' '}
+                  <span className="font-mono tabular-nums">32.0</span>,{' '}
+                  <span className="text-ink">Potential Fit</span> from{' '}
+                  <span className="font-mono tabular-nums">32.0</span> to{' '}
+                  <span className="font-mono tabular-nums">86.1</span>,{' '}
+                  <span className="text-ink">Good Fit</span> at{' '}
+                  <span className="font-mono tabular-nums">86.2+</span>.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                {FIT_FORMULA_FEATURES.map((feat) => (
+                  <div
+                    key={feat.name}
+                    className="rounded-ctrl bg-card border border-hairline px-3 py-2 space-y-0.5 min-w-0"
+                  >
+                    <div className="flex items-center justify-between gap-2 font-mono text-[12px] tabular-nums">
+                      <span className="text-ink font-medium">{feat.name}</span>
+                      <span className="text-muted">{feat.weight}</span>
+                    </div>
+                    <p className="text-[12px] text-muted leading-snug">
+                      {feat.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-[12px] text-muted leading-relaxed">
+                The 7-dimension <span className="font-mono">rule_score</span>{' '}
+                (Skills 30, Title 20, Experience 15, Education 10, Industry 10,
+                Location 8, Salary 7) is shown beside each match for breakdown,
+                but does not set the 0–100 fit score or verdict.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Calm Notice When Injection Guard Removed Lines */}
+      {removedLines.length > 0 && (
+        <section
+          data-result-card
+          aria-label="Removed document lines"
+          className="rounded-panel bg-surface border border-hairline-strong p-4 sm:p-5 space-y-3"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1 min-w-0">
+              <p className="text-[14px] font-medium text-ink">
+                {formatRemovedSummary(removedLines)}
+              </p>
+              <p className="text-[13px] text-muted leading-relaxed">
+                Lines that look like instructions to the AI are left out before
+                extraction so they do not affect the match.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRemoved((prev) => !prev)}
+              aria-expanded={showRemoved}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-ctrl border border-hairline-strong bg-card text-[13px] font-medium text-ink hover:bg-ground transition-colors shrink-0 self-start sm:self-auto"
+            >
+              <span>
+                {showRemoved ? 'Hide removed text' : 'Show removed text'}
+              </span>
+              {showRemoved ? (
+                <ChevronUpIcon className="w-4 h-4 text-muted" aria-hidden="true" />
+              ) : (
+                <ChevronDownIcon className="w-4 h-4 text-muted" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+
+          {showRemoved && (
+            <ul className="space-y-2 pt-1">
+              {removedLines.map((item, idx) => (
+                <li
+                  key={`${item.source}-${item.line}-${idx}`}
+                  className="rounded-ctrl bg-card border border-hairline p-3 space-y-1.5"
+                >
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] font-mono text-muted">
+                    <span className="text-ink font-medium">
+                      {item.source === 'jd' ? 'Job description' : 'CV'}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span className="tabular-nums">line {item.line}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      {INJECTION_KIND_LABELS[item.kind] ??
+                        item.kind.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <pre className="text-[13px] leading-relaxed text-body font-mono whitespace-pre-wrap [overflow-wrap:anywhere] break-words m-0">
+                    {item.text}
+                  </pre>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Ranked Job Cards */}
       {matches.length === 0 ? (

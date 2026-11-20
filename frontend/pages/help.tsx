@@ -50,7 +50,7 @@ const FAQS = [
   {
     question: 'How is the 0–100 fit score calculated?',
     answer:
-      'First, deterministic V3.1 rules score seven weighted dimensions: Skills (30), Title (20), Experience (15), Education (10), Industry (10), Location (8), and Salary (7). Then the hybrid_qwen_v1 ranker combines those rule scores with Qwen3-Embedding-4B whole-text cosine, job-title cosine, and corpus TF-IDF cosine.',
+      'fit = 100 / (1 + exp(-logit)), where logit comes from the hybrid_qwen_v1 logistic model (intercept -10.958603) over eight features: five V3.1 rule scores divided by 100 — skills (1.758144), title (0.137788), experience (0.15821), education (-0.095872), and industry (0.83903) — plus Qwen3-Embedding-4B whole-text cosine text_cos (12.967617), job-title cosine title_cos (4.369925), and corpus TF-IDF cosine tfidf_cos (7.043981). Verdict cut-offs come from grade_cutoffs [-0.754985, 1.828859] — about 32 and 86 on the 0–100 scale (No Fit below 32.0, Potential Fit 32.0–86.1, Good Fit 86.2+). The separate 7-dimension rule_score (Skills 30, Title 20, Experience 15, Education 10, Industry 10, Location 8, Salary 7) is shown beside fit for breakdown only and does not set the fit score or verdict.',
   },
   {
     question: 'What does “not scored” mean on the breakdown or radar?',

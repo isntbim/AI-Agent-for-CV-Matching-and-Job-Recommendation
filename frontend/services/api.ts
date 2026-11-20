@@ -76,6 +76,15 @@ export interface SavedFeedback {
   comment: string | null;
 }
 
+export type InjectionSource = 'cv' | 'jd';
+
+export interface InjectionFinding {
+  line: number;
+  kind: string;
+  text: string;
+  source: InjectionSource;
+}
+
 export interface MatchResponse {
   run_id?: number;
   as_of: string;
@@ -86,6 +95,7 @@ export interface MatchResponse {
   ranking_model: string;
   matches: JobMatch[];
   feedback?: Record<string, SavedFeedback>;
+  injection_removed?: InjectionFinding[];
 }
 
 export interface HealthResponse {
