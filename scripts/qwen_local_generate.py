@@ -21,15 +21,20 @@ def main() -> None:
     p.add_argument("--split", default="test")
     p.add_argument("--ids", default=None)
     p.add_argument("--repetition-penalty", type=float, nargs="+", default=[1.05])
+    p.add_argument("--model", default="qwen-v4", help="Ollama model name (e.g. qwen-v4-q8 for the 8-bit build)")
+    p.add_argument("--rows", type=Path, default=None, help="jsonl of {id, task, messages} to run instead of a dataset split")
     args = p.parse_args()
-    rows = [dict(json.loads(line), task=task) for task in ("cv_extraction", "jd_extraction")
-            for line in (DATA / task / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines()]
+    if args.rows:
+        rows = [json.loads(line) for line in args.rows.read_text(encoding="utf-8").splitlines()]
+    else:
+        rows = [dict(json.loads(line), task=task) for task in ("cv_extraction", "jd_extraction")
+                for line in (DATA / task / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines()]
     if args.ids:
         rows = [r for r in rows if r["id"] in set(args.ids.split(","))]
     done = set()
     if args.out.exists():
         done = {(r["id"], r["repetition_penalty"]) for r in map(json.loads, args.out.read_text(encoding="utf-8").splitlines())}
-    llm = QwenV4()
+    llm = QwenV4(model=args.model)
     with args.out.open("a", encoding="utf-8") as f:
         for rp in args.repetition_penalty:
             for r in rows:

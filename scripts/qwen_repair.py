@@ -419,8 +419,13 @@ def repair(label: dict, text: str, task: str) -> tuple[dict, str, list[str]]:
     return label, status, log
 
 
-def sources(split: str) -> dict:
+def sources(split: str, rows_file: Path | None = None) -> dict:
     out = {}
+    if rows_file:  # an ad-hoc set (e.g. the human-checked holdout CVs) instead of a dataset split
+        for line in rows_file.read_text(encoding="utf-8").splitlines():
+            g = json.loads(line)
+            out[g["id"]] = json.loads(g["messages"][1]["content"])["source_text"]
+        return out
     for task in ("cv_extraction", "jd_extraction"):
         for line in (DATA / task / f"{split}.jsonl").read_text(encoding="utf-8").splitlines():
             g = json.loads(line)
@@ -433,10 +438,11 @@ def main() -> None:
     p.add_argument("preds", type=Path)
     p.add_argument("out", type=Path)
     p.add_argument("--retry", type=Path, default=None)
+    p.add_argument("--rows", type=Path, default=None, help="jsonl of {id, task, messages} the predictions were made from")
     args = p.parse_args()
     rows = [json.loads(line) for line in args.preds.read_text(encoding="utf-8").splitlines()]
     retries = [json.loads(line) for line in args.retry.read_text(encoding="utf-8").splitlines()] if args.retry else []
-    text = sources(rows[0]["split"])
+    text = sources(rows[0]["split"], args.rows)
     before, after = {}, {}
 
     def attempt(r: dict) -> None:
