@@ -366,7 +366,7 @@ const Hero: React.FC = () => {
                 aria-hidden="true"
                 className="w-1.5 h-1.5 rounded-full bg-accent"
               />
-              <span>361 CareerViet postings · 12&nbsp;GB local GPU</span>
+              <span>361 postings from CareerViet &amp; ITviec · ~14&nbsp;GB VRAM</span>
             </p>
 
             <h1
@@ -375,7 +375,7 @@ const Hero: React.FC = () => {
             >
               <span ref={plainHeadlineRef}>CV matching for</span>{' '}
               <span ref={gradHeadlineRef} className="text-gradient inline-block">
-                CareerViet job seekers
+                job seekers in Vietnam
               </span>
             </h1>
 

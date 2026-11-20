@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useId } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -19,47 +19,18 @@ const NAVIGATION = [
   { name: 'Guide', href: '/help' },
 ];
 
+// Matchly "Latch" mark: an equals sign whose two bars lock together (output/review3/logo/matchly-kit).
 export const BentoLogoMark: React.FC<{ className?: string }> = ({
   className = 'w-7 h-7',
-}) => {
-  const rawId = useId();
-  const gradId = `bento-logo-${rawId.replace(/:/g, '')}`;
-  return (
-    <svg
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden="true"
-      className={className}
-    >
-      <defs>
-        <linearGradient
-          id={gradId}
-          x1="19"
-          y1="6"
-          x2="26"
-          y2="15"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0%" stopColor="var(--ring-stop-1)" />
-          <stop offset="100%" stopColor="var(--ring-stop-3)" />
-        </linearGradient>
-      </defs>
-      <rect width="32" height="32" rx="8" fill="var(--ink)" />
-      <rect x="6" y="6" width="11" height="9" rx="2.5" fill="var(--bg)" />
-      <rect x="19" y="6" width="7" height="9" rx="2.5" fill={`url(#${gradId})`} />
-      <rect
-        x="6"
-        y="17"
-        width="7"
-        height="9"
-        rx="2.5"
-        fill="var(--bg)"
-        fillOpacity="0.58"
-      />
-      <rect x="15" y="17" width="11" height="9" rx="2.5" fill="var(--bg)" />
-    </svg>
-  );
-};
+}) => (
+  <svg viewBox="24 24 208 208" aria-hidden="true" className={className}>
+    <path
+      fill="var(--accent)"
+      fillRule="evenodd"
+      d="M46 72H210A22 22 0 0 1 210 116H180V138H140V116H46A22 22 0 0 1 46 72ZM46 140H116V162H204V140H210A22 22 0 0 1 210 184H46A22 22 0 0 1 46 140Z"
+    />
+  </svg>
+);
 
 const Header: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -283,7 +254,7 @@ const Header: React.FC = () => {
         >
           <BentoLogoMark className="w-7 h-7 shrink-0" />
           <span className="text-[18px] sm:text-[20px] font-medium tracking-[-0.03em] text-ink truncate">
-            ResuMatch
+            Matchly
           </span>
         </Link>
 
@@ -375,7 +346,7 @@ const Header: React.FC = () => {
               >
                 <BentoLogoMark className="w-7 h-7 shrink-0" />
                 <span className="text-[18px] sm:text-[20px] font-medium tracking-[-0.03em] text-ink truncate">
-                  ResuMatch
+                  Matchly
                 </span>
               </Link>
 

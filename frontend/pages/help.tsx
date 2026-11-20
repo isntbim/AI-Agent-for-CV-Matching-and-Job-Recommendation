@@ -45,7 +45,7 @@ const FAQS = [
   {
     question: 'Why does a brand-new CV take 20 to 60 seconds?',
     answer:
-      'Every new CV is parsed locally on a single 12 GB GPU by the QLoRA fine-tuned Qwen2.5-7B extractor and verified by a LangGraph repair loop. Once extracted, its structured JSON is cached on disk by SHA-256 hash and cutoff date, so a repeat run skips extraction and takes about 17 seconds, most of it spent writing the five match explanations.',
+      'Every new CV is parsed on the GPU (three models in about 14 GB of VRAM) by the QLoRA fine-tuned Qwen2.5-7B extractor and verified by a LangGraph repair loop. Once extracted, its structured JSON is cached on disk by SHA-256 hash and cutoff date, so a repeat run skips extraction and takes about 17 seconds, most of it spent writing the five match explanations.',
   },
   {
     question: 'How is the 0–100 fit score calculated?',
@@ -139,10 +139,10 @@ const HelpPage: React.FC = () => {
   return (
     <>
       <Head>
-        <title>Usage guide — ResuMatch</title>
+        <title>Usage guide — Matchly</title>
         <meta
           name="description"
-          content="Usage guide and common questions for running ResuMatch locally: file requirements, SSE streaming latency, 7-dimension rule scores, and health statuses."
+          content="Usage guide and common questions for using Matchly: file requirements, SSE streaming latency, 7-dimension rule scores, and health statuses."
         />
       </Head>
 

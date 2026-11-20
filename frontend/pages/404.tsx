@@ -35,10 +35,10 @@ const Custom404: React.FC = () => {
   return (
     <>
       <Head>
-        <title>404 — Page not found | ResuMatch</title>
+        <title>404 — Page not found | Matchly</title>
         <meta
           name="description"
-          content="The requested page could not be found in ResuMatch."
+          content="The requested page could not be found in Matchly."
         />
       </Head>
 
@@ -62,7 +62,7 @@ const Custom404: React.FC = () => {
                 <span className="text-gradient">Page not found</span>
               </h1>
               <p className="text-[16px] text-body leading-relaxed">
-                This URL does not match any page in ResuMatch. Jump directly to
+                This URL does not match any page in Matchly. Jump directly to
                 the CV matcher or return to the overview.
               </p>
 

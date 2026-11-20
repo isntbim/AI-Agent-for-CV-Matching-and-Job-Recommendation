@@ -33,13 +33,13 @@ export default function App({ Component, pageProps }: AppProps) {
         <meta property="og:type" content="website" />
         <meta
           property="og:title"
-          content="ResuMatch: CareerViet CV-to-job matching"
+          content="Matchly: CV-to-job matching"
         />
         <meta
           property="og:description"
-          content="Rank a PDF, DOCX, or TXT resume against 361 CareerViet postings locally on one 12 GB GPU with Qwen2.5-7B extraction, seven rule weights, and literal quotes."
+          content="Rank a PDF, DOCX, or TXT resume against 361 crawled job postings or a pasted job description, using Qwen2.5-7B extraction, seven rule weights, and literal quotes (about 14 GB of GPU memory in total)."
         />
-        <meta property="og:image" content="/favicon.svg" />
+        <meta property="og:image" content="/icon-512.png" />
         <meta name="twitter:card" content="summary" />
       </Head>
       <ErrorBoundary>

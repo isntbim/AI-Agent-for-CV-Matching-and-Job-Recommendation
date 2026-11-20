@@ -80,7 +80,7 @@ const Features: React.FC = () => {
             data-feat-heading
             className="text-[28px] sm:text-[36px] leading-[1.14] text-ink"
           >
-            CareerViet matching pipeline in four stages.{' '}
+            Matching pipeline in four stages.{' '}
             <span className="text-muted">
               Every score links back to literal text.
             </span>
@@ -141,7 +141,7 @@ const Features: React.FC = () => {
           >
             <div className="space-y-2">
               <h3 className="text-[20px] leading-snug text-ink">
-                Top-20 CareerViet retrieval
+                Top-20 retrieval
               </h3>
               <p className="text-[16px] leading-[1.55] text-body">
                 Multilingual BGE-M3 vectors and BM25 lexical scores fuse on CPU
@@ -155,7 +155,7 @@ const Features: React.FC = () => {
             >
               <div className="ui-frag p-3.5 space-y-2.5 text-[13px] font-mono">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted">CareerViet index</span>
+                  <span className="text-muted">Job index</span>
                   <span className="text-ink font-medium">361 jobs</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-surface overflow-hidden">
@@ -255,7 +255,7 @@ const Features: React.FC = () => {
             </div>
           </Link>
 
-          {/* Row 2, Card 3 (span 4): Local 12 GB GPU */}
+          {/* Row 2, Card 3 (span 4): GPU memory */}
           <Link
             href="/about#runtime"
             data-feat-card
@@ -263,11 +263,11 @@ const Features: React.FC = () => {
           >
             <div className="space-y-2">
               <h3 className="text-[20px] leading-snug text-ink">
-                Single 12&nbsp;GB GPU runtime
+                About 14&nbsp;GB of GPU memory
               </h3>
               <p className="text-[16px] leading-[1.55] text-body">
-                Ollama keeps extractor and embedding models co-resident in
-                9.7&nbsp;GB VRAM, with SHA-256 extraction caching.
+                Ollama keeps the extractor, explainer and embedding models loaded
+                together in about 14&nbsp;GB of VRAM, with SHA-256 extraction caching.
               </p>
             </div>
 
@@ -278,24 +278,30 @@ const Features: React.FC = () => {
               <div className="ui-frag p-3.5 space-y-2.5 text-[13px] font-mono">
                 <div className="flex justify-between">
                   <span className="text-muted">VRAM in use</span>
-                  <span className="text-ink">9.7 / 12.0&nbsp;GB</span>
+                  <span className="text-ink">14.2&nbsp;GB</span>
                 </div>
                 <div className="h-2 rounded-full bg-surface overflow-hidden flex">
                   <div
                     data-feat-bar
                     className="h-full bar-brand origin-left"
-                    style={{ width: '55%' }}
-                    title="qwen-v4: 6.6 GB"
+                    style={{ width: '44%' }}
+                    title="qwen-v4: 6.2 GB"
                   />
                   <div
                     data-feat-bar
                     className="h-full bg-ink/40 origin-left"
-                    style={{ width: '26%' }}
-                    title="qwen3-embedding:4b: 3.1 GB"
+                    style={{ width: '34%' }}
+                    title="qwen-o5: 4.8 GB"
+                  />
+                  <div
+                    data-feat-bar
+                    className="h-full bg-ink/20 origin-left"
+                    style={{ width: '22%' }}
+                    title="qwen3-embedding:4b: 3.2 GB"
                   />
                 </div>
                 <div className="text-muted">
-                  6.6&nbsp;GB extractor · 3.1&nbsp;GB emb
+                  6.2 extractor · 4.8 explainer · 3.2 emb (GB)
                 </div>
               </div>
             </div>

@@ -23,7 +23,7 @@ const PIPELINE_STAGES = [
     model: 'BAAI/bge-m3 + BM25 (CPU)',
     span: 'lg:col-span-6',
     summary:
-      'Searches the 361-posting CareerViet index by combining multilingual dense cosine similarity with BM25 lexical term matching.',
+      'Searches the 361 indexed job postings (crawled from CareerViet and ITviec) by combining multilingual dense cosine similarity with BM25 lexical term matching.',
     detail:
       'Reciprocal rank fusion narrows 361 postings down to a top-20 candidate pool in milliseconds on CPU without touching GPU VRAM.',
   },
@@ -219,10 +219,10 @@ const AboutPage: React.FC = () => {
   return (
     <>
       <Head>
-        <title>Architecture — ResuMatch</title>
+        <title>Architecture — Matchly</title>
         <meta
           name="description"
-          content="Technical architecture of the CareerViet CV-JD matching pipeline: QLoRA Qwen2.5-7B extraction, BGE-M3 + BM25 retrieval, seven V3.1 rule weights, and hybrid_qwen_v1 ranking on a single 12 GB GPU."
+          content="Technical architecture of the CV-JD matching pipeline: QLoRA Qwen2.5-7B extraction, BGE-M3 + BM25 retrieval, seven V3.1 rule weights, and hybrid_qwen_v1 ranking, with about 14 GB of GPU memory."
         />
       </Head>
 
@@ -249,16 +249,17 @@ const AboutPage: React.FC = () => {
               >
                 Architecture of the{' '}
                 <span className="text-gradient">
-                  CareerViet matching pipeline
+                  CV-to-job matching pipeline
                 </span>
               </h1>
               <p
                 data-about-hero
                 className="text-[17px] sm:text-[18px] leading-[1.55] text-body max-w-[60ch]"
               >
-                ResuMatch pairs language-model extraction with deterministic
+                Matchly pairs language-model extraction with deterministic
                 seven-axis rule scoring and embedding cosines so every ranked
-                job can be audited back to verbatim text on a single 12 GB GPU.
+                job can be audited back to verbatim text. The three models use
+                about 14 GB of GPU memory.
               </p>
               <div
                 data-about-hero
@@ -293,7 +294,7 @@ const AboutPage: React.FC = () => {
                   Four sequential stages per run
                 </h2>
                 <p className="text-[16px] text-body">
-                  All 361 CareerViet job postings are pre-extracted offline; a
+                  All 361 job postings are pre-extracted offline; a
                   live request only extracts the uploaded CV once and caches it
                   by SHA-256 hash.
                 </p>
@@ -346,7 +347,7 @@ const AboutPage: React.FC = () => {
                 </h2>
                 <p className="text-[16px] text-body">
                   Weights sum to 100 points and reflect how strongly each signal
-                  separates qualified candidates across CareerViet postings.
+                  separates qualified candidates across job postings.
                 </p>
               </div>
 
@@ -396,7 +397,7 @@ const AboutPage: React.FC = () => {
                     Unscored axes & decision bands
                   </h3>
                   <p className="text-[15px] text-body leading-relaxed">
-                    CareerViet postings frequently omit salary ranges, explicit
+                    Crawled job postings often omit salary ranges, explicit
                     degree requirements, or years of tenure. Instead of
                     penalizing the candidate or hallucinating missing fields,
                     the scorer assigns a neutral midpoint (50, or 75 for salary)
@@ -427,7 +428,7 @@ const AboutPage: React.FC = () => {
             </div>
           </section>
 
-          {/* Section 3: 12 GB GPU Runtime & FastAPI Contract */}
+          {/* Section 3: GPU memory budget & FastAPI Contract */}
           <section
             id="runtime"
             aria-labelledby="runtime-heading"
@@ -439,11 +440,11 @@ const AboutPage: React.FC = () => {
                   id="runtime-heading"
                   className="text-[26px] sm:text-[36px] leading-[1.14] text-ink"
                 >
-                  Single-GPU budget and FastAPI routes
+                  GPU memory budget and FastAPI routes
                 </h2>
                 <p className="text-[16px] text-body">
-                  Everything runs locally through Ollama and FastAPI with zero
-                  external API calls or cloud telemetry.
+                  The models run in Ollama on a Runpod serverless GPU (or a local
+                  GPU) behind FastAPI; no commercial LLM API is called.
                 </p>
               </div>
 
@@ -453,18 +454,22 @@ const AboutPage: React.FC = () => {
                   className="bento-card lg:col-span-5 p-6 sm:p-8 space-y-4 min-w-0"
                 >
                   <h3 className="text-[20px] leading-snug text-ink">
-                    12 GB VRAM co-residency
+                    About 14 GB VRAM, three models
                   </h3>
                   <dl className="space-y-3 text-[14px]">
                     <div className="pb-2.5 border-b border-hairline flex justify-between gap-3">
                       <dt className="text-muted">Extractor (qwen-v4)</dt>
-                      <dd className="font-mono text-ink">6.6 GB VRAM</dd>
+                      <dd className="font-mono text-ink">6.2 GB VRAM</dd>
+                    </div>
+                    <div className="pb-2.5 border-b border-hairline flex justify-between gap-3">
+                      <dt className="text-muted">Explainer (qwen-o5)</dt>
+                      <dd className="font-mono text-ink">4.8 GB VRAM</dd>
                     </div>
                     <div className="pb-2.5 border-b border-hairline flex justify-between gap-3">
                       <dt className="text-muted">
                         Ranker (qwen3-embedding:4b)
                       </dt>
-                      <dd className="font-mono text-ink">3.1 GB VRAM</dd>
+                      <dd className="font-mono text-ink">3.2 GB VRAM</dd>
                     </div>
                     <div className="pb-2.5 border-b border-hairline flex justify-between gap-3">
                       <dt className="text-muted">Retrieval (BGE-M3 + BM25)</dt>

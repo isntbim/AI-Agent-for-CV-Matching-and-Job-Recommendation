@@ -165,10 +165,10 @@ const HomePage: React.FC = () => {
   return (
     <>
       <Head>
-        <title>ResuMatch: CareerViet CV-to-job matching</title>
+        <title>Matchly: CV-to-job matching</title>
         <meta
           name="description"
-          content="Match a PDF, DOCX, or TXT resume against 361 CareerViet job postings locally on one 12 GB GPU using fine-tuned Qwen2.5-7B extraction, seven weighted rules, and hybrid Qwen3-Embedding-4B ranking."
+          content="Match a PDF, DOCX, or TXT resume against 361 job postings crawled from CareerViet and ITviec, or a pasted job description, with about 14 GB of GPU memory using fine-tuned Qwen2.5-7B extraction, seven weighted rules, and hybrid Qwen3-Embedding-4B ranking."
         />
       </Head>
 
@@ -194,7 +194,7 @@ const HomePage: React.FC = () => {
                   data-rubric-heading
                   className="text-[28px] sm:text-[36px] leading-[1.14] text-ink"
                 >
-                  CareerViet 100-point scoring rubric
+                  100-point scoring rubric
                 </h2>
               </div>
 
@@ -228,7 +228,7 @@ const HomePage: React.FC = () => {
                       <div className="pb-2.5 border-b border-hairline flex items-baseline justify-between gap-4">
                         <dt className="text-muted">First CV run</dt>
                         <dd className="font-mono text-[14px] text-ink text-right">
-                          20–60&nbsp;s (12&nbsp;GB&nbsp;GPU)
+                          20–60&nbsp;s
                         </dd>
                       </div>
                       <div className="flex items-baseline justify-between gap-4">

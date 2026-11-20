@@ -18,10 +18,11 @@ const Footer: React.FC<FooterProps> = ({ hideClosingCta = false }) => {
           <div className="bento-card bento-card--highlight p-6 sm:p-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="max-w-2xl space-y-2">
               <h2 className="text-[28px] sm:text-[36px] leading-[1.14] text-ink">
-                Rank your CV against 361 CareerViet postings.
+                Rank your CV against 361 job postings, or paste your own.
               </h2>
               <p className="text-[16px] text-body">
-                Run a PDF, DOCX, or TXT resume locally on one 12&nbsp;GB GPU and
+                Run a PDF, DOCX, or TXT resume through three models in about
+                14&nbsp;GB of GPU memory and
                 inspect every dimension score and verbatim quote.
               </p>
             </div>
@@ -46,11 +47,11 @@ const Footer: React.FC<FooterProps> = ({ hideClosingCta = false }) => {
             >
               <BentoLogoMark className="w-7 h-7" />
               <span className="text-[20px] font-medium tracking-[-0.03em] text-ink">
-                ResuMatch
+                Matchly
               </span>
             </Link>
             <p className="text-[16px] text-muted max-w-[52ch] leading-relaxed">
-              Local CV-to-job matching pipeline for the CareerViet corpus:
+              CV-to-job matching over 361 public job postings crawled from CareerViet and ITviec:
               QLoRA Qwen2.5-7B extraction, hybrid BGE-M3 and BM25 retrieval,
               seven weighted V3.1 rules, and Qwen3-Embedding-4B ranking.
             </p>
@@ -120,7 +121,7 @@ const Footer: React.FC<FooterProps> = ({ hideClosingCta = false }) => {
                   href="/about#runtime"
                   className="inline-flex items-center min-h-[44px] text-body hover:text-ink underline-offset-4 hover:underline"
                 >
-                  12 GB GPU runtime
+                  14 GB GPU runtime
                 </Link>
               </li>
               <li>
@@ -138,8 +139,10 @@ const Footer: React.FC<FooterProps> = ({ hideClosingCta = false }) => {
         {/* Row 3: Legal & MIT Attribution (NOTICE.md) */}
         <div className="pt-6 border-t border-hairline flex flex-col md:flex-row md:items-center justify-between gap-3 text-[13px] text-muted">
           <p>
-            © {currentYear} ATS CV-JD Matching Capstone (FA26AI45). Local
-            inference via Ollama and FastAPI.
+            © {currentYear} ATS CV-JD Matching Capstone (FA26AI45). Models served
+            by Ollama on a Runpod serverless GPU, behind FastAPI. Job postings were
+            collected from the public pages of CareerViet and ITviec; Matchly is not
+            affiliated with either site.
           </p>
           <p>
             Frontend adapted from{' '}

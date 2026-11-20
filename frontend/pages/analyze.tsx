@@ -361,10 +361,10 @@ const AnalyzePage: React.FC = () => {
   return (
     <>
       <Head>
-        <title>Upload a CV — ResuMatch</title>
+        <title>Upload a CV — Matchly</title>
         <meta
           name="description"
-          content="Upload a PDF, DOCX, or TXT CV or paste resume text to rank top CareerViet job matches with 7-dimension rule scores and verbatim quotes."
+          content="Upload a PDF, DOCX, or TXT CV or paste resume text to rank the top job matches, or score it against a pasted job description, with 7-dimension rule scores and verbatim quotes."
         />
       </Head>
 
@@ -381,7 +381,7 @@ const AnalyzePage: React.FC = () => {
             <header data-analyze-head className="space-y-2 max-w-3xl">
               <h1 className="text-[30px] sm:text-[38px] leading-[1.1] text-ink">
                 Match a CV against{' '}
-                <span className="text-gradient">361 CareerViet jobs</span>
+                <span className="text-gradient">361 job postings</span>
               </h1>
               <p className="text-[16px] text-body leading-relaxed">
                 Upload a resume file or paste plain text. First-time extraction
@@ -517,7 +517,7 @@ const AnalyzePage: React.FC = () => {
                         </span>
                       </div>
                       <p className="text-[13.5px] text-muted leading-relaxed">
-                        Leave blank to search all 361 CareerViet jobs, or paste
+                        Leave blank to search all 361 job postings, or paste
                         one posting to score your CV against that role alone.
                       </p>
                     </div>
@@ -810,7 +810,7 @@ const AnalyzePage: React.FC = () => {
                           <h2 className="text-[21px] leading-snug text-ink">
                             {isPastedMode
                               ? 'Matching CV against your job description'
-                              : 'Running CareerViet matching pipeline'}
+                              : 'Running the matching pipeline'}
                           </h2>
                           <p className="text-[14px] text-muted">
                             Streaming live progress over{' '}
@@ -971,7 +971,7 @@ const AnalyzePage: React.FC = () => {
                   >
                     <div className="space-y-2 max-w-2xl">
                       <p className="font-mono text-[13px] text-accent-text">
-                        361 CareerViet postings · hybrid_qwen_v1
+                        361 postings · hybrid_qwen_v1
                       </p>
                       <h2 className="text-[24px] sm:text-[28px] leading-[1.18] text-ink">
                         Ready to score a resume

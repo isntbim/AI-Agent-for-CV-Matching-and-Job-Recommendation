@@ -869,7 +869,7 @@ const JobMatchCard: React.FC<JobMatchCardProps> = ({
           <h5 className="text-[14px] font-medium text-ink">
             {isPastedJob
               ? 'Your pasted job description'
-              : `Full CareerViet job posting (${match.jd})`}
+              : `Full job posting (${match.jd})`}
           </h5>
           <pre className="text-[13px] leading-relaxed text-body font-mono max-h-80 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words m-0">
             {match.job_text}
